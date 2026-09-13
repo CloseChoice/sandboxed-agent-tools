@@ -1,0 +1,21 @@
+[package]
+name = "fff-fuzzy-component"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Filesystem-free fuzzy matching component using FFF's neo_frizbee matcher"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+neo_frizbee = { version = "=0.11.0", features = ["safe_read"] }
+wit-bindgen = "0.46"
+
+[patch.crates-io]
+neo_frizbee = { path = "vendor/neo_frizbee" }
+
+[profile.release]
+lto = true
+opt-level = 3
+strip = "debuginfo"
