@@ -1,0 +1,12 @@
+package root:component;
+
+world root {
+  import wasi:random/random@0.2.12;
+
+  export run: func() -> u64;
+}
+package wasi:random@0.2.12 {
+  interface random {
+    get-random-u64: func() -> u64;
+  }
+}

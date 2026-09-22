@@ -1,0 +1,16 @@
+name = "files"
+version = "0.1.0"
+description = "Read/list documents, read an input file, or write an output file."
+entrypoint = "run"
+
+[[arguments]]
+name = "operation"
+help = "read, list, write-dir, input, output, or env."
+
+[options.path]
+default = "."
+help = "Path relative to the documents directory."
+
+[options.text]
+default = ""
+help = "Text to write."

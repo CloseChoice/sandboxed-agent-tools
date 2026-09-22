@@ -1,6 +1,9 @@
 # Standalone Brave search through WASI HTTP
 
-This example is independent of SAT: no registry, marketplace, installation flow,
+For the SAT/Pi integration, see [pi-extension](../pi-extension/README.md). The guest
+also exports a root `run(query)` entrypoint for SAT.
+
+The original standalone runner is independent of SAT: no registry, marketplace, installation flow,
 or SAT configuration. It demonstrates a **WASI P2 component with an explicit WIT world** and the small
 native Wasmtime host needed to enforce a provider policy and inject authentication.
 

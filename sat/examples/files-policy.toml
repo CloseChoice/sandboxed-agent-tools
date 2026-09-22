@@ -1,0 +1,11 @@
+[[folders]]
+name = "documents"
+access = ["read"]
+
+[[files]]
+name = "input"
+access = ["read"]
+
+[[files]]
+name = "output"
+access = ["write"]

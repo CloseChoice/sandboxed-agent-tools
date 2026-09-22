@@ -168,8 +168,9 @@ grant or outside the granted folder, including traversal and symlink escapes.
 
 ## Proposed SAT tool package and CLI design
 
-Proposed behavior, not implemented yet. One `.wasm` component is the authoritative
-package; separate WIT/TOML files are extractable inspection copies.
+The initial local MVP is available in [`sat/`](sat/README.md); its README lists
+current support and limitations. The design below uses one `.wasm` component as
+the authoritative package; separate WIT/TOML files are extractable inspection copies.
 
 | Contents | Location |
 | --- | --- |

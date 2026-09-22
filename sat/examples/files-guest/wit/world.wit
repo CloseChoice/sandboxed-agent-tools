@@ -1,0 +1,17 @@
+package sat:files-demo@0.1.0;
+
+world files-demo {
+    import documents: interface {
+        %list: func(path: string) -> result<list<string>, string>;
+        read: func(path: string) -> result<string, string>;
+        // Deliberately present: the embedded policy must block this operation.
+        write: func(path: string, contents: string) -> result<_, string>;
+    }
+    import input: interface {
+        read: func() -> result<string, string>;
+    }
+    import output: interface {
+        write: func(contents: string) -> result<_, string>;
+    }
+    export run: func(operation: string, path: string, text: string) -> result<string, string>;
+}

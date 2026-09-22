@@ -1,0 +1,6 @@
+package example:http-get@0.1.0;
+
+world http-get {
+    import wasi:http/outgoing-handler@0.2.12;
+    export run: func(method: string, url: string) -> result<string, string>;
+}

@@ -1,0 +1,10 @@
+name = "brave-search"
+version = "0.1.0"
+description = "Search the web with Brave; return up to five titles, URLs and snippets."
+entrypoint = "run"
+
+[options.query]
+help = "Web search query."
+
+[[examples]]
+command = 'sat brave-search --query "WASI components" --allow-http --json'

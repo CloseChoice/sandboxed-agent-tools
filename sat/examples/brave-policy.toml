@@ -1,0 +1,7 @@
+files = []
+folders = []
+
+[[http]]
+methods = ["GET"]
+origin = "https://api.search.brave.com"
+paths = ["/res/v1/web/search"]

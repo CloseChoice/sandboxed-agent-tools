@@ -1,0 +1,8 @@
+package example:random-number@0.1.0;
+
+world random-number {
+    import wasi:random/random@0.2.12;
+
+    /// Return one cryptographically secure random unsigned 64-bit integer.
+    export run: func() -> u64;
+}

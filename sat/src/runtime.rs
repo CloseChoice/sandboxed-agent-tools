@@ -1,293 +1,764 @@
-// In this file we want to build the functionality to execute other modules via wasmtime
-// We should be able to check if a tool is registered, verify a tool via it's wit file and execute
-// it
-// We'll start with checking if registered, executing and then verifying
-// we'll assume that a tool is available as a wasm file and a wit file and is stored in
-// WAT_HOME/<tool_name>
-use std::env;
-use std::ffi::OsString;
-use std::io;
-use std::path::{Component, Path, PathBuf};
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
+use crate::{
+    files::{self, Capability},
+    metadata::{Package, Policy, valid_name},
+};
+use anyhow::{Context, Result, bail, ensure};
+use clap::{Arg, ArgAction, ArgGroup, Command};
+use http::{Request, Response};
+use http_body_util::BodyExt;
+use serde_json::{Value as Json, json};
+use std::{collections::BTreeSet, future::Future, path::Path, time::Duration};
+use wasmtime::component::{Component, Linker, ResourceTable, Type, Val, types::ComponentItem};
+use wasmtime::{Config, Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi_http::{
+    Error, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks, WasiHttpView,
+};
 
-/// Host policy categories for the WASI Preview 2 capability interfaces.
-///
-/// This is SAT policy, not an enum defined by the WASI specification. Each entry
-/// describes the complete policy for its category. A consumer must reject duplicate
-/// categories and treat omitted categories as denied, rather than merge grants.
-/// `wasi:io` streams/poll/error operate on already granted resources and confer no
-/// separate ambient authority. Guest exports (CLI run / HTTP incoming-handler)
-/// are entry points, not permissions; the host controls when it invokes them.
-///
-/// These declarations do not enforce policy. Denied imports must be rejected or
-/// implemented by denying host functions. WasiCtxBuilder defaults alone do not
-/// deny clocks or randomness. HTTP also requires its own host implementation.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WasiP2Permissions {
-    Stdin(StdinPolicy),
-    Stdout(OutputPolicy),
-    Stderr(OutputPolicy),
-    /// Terminal handles/TTY disclosure are independent of stream access.
-    Terminals(TerminalPolicy),
-    /// Only explicitly supplied values; never implicitly inherit the host env.
-    Environment(Grant<Vec<(String, String)>>),
-    Arguments(Grant<Vec<String>>),
-    /// Guest-visible directory name only; this grants no filesystem access.
-    InitialCwd(Grant<String>),
-    DirectoryGrants(Grant<Vec<DirectoryGrant>>),
-    NetworkPolicy(NetworkPolicy),
-    /// Outgoing HTTP requests, independent of raw socket authority.
-    Http(Grant<Vec<HttpEndpoint>>),
-    Clocks(ClockPolicy),
-    Random(RandomPolicy),
-    /// Guest termination only; never permission to terminate the host process.
-    Exit(Access),
+type IoFuture = Box<dyn Future<Output = Result<(), Error>> + Send>;
+type ResponseFuture =
+    Box<dyn Future<Output = Result<(Response<WasiBody>, IoFuture), Error>> + Send>;
+
+pub struct HttpPolicy {
+    pub allowed: bool,
+    pub package: Policy,
+    pub(crate) credential: Option<crate::credentials::Credential>,
+    #[cfg(test)]
+    fixture: Option<&'static [u8]>,
 }
-
-/// Deny access unless host policy explicitly approves it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Access {
-    #[default]
-    Deny,
-    Allow,
-}
-
-/// A complete category grant. For collections, an empty allow-list grants nothing.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum Grant<T> {
-    #[default]
-    Deny,
-    Allow(T),
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum StdinPolicy {
-    /// Closed input (EOF); no access to host stdin.
-    #[default]
-    Deny,
-    /// Only these bytes are readable.
-    Bytes(Vec<u8>),
-    Inherit,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum OutputPolicy {
-    /// Discard output; no access to host stdout/stderr.
-    #[default]
-    Deny,
-    /// Host-owned buffer; fail further writes when the limit is reached.
-    Capture { max_bytes: usize },
-    Inherit,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TerminalPolicy {
-    pub stdin: Access,
-    pub stdout: Access,
-    pub stderr: Access,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ClockPolicy {
-    pub wall_clock: Access,
-    /// Includes time reads, resolution and timer subscriptions.
-    pub monotonic_clock: Access,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RandomPolicy {
-    pub secure: Access,
-    pub insecure: Access,
-    pub insecure_seed: Access,
-}
-
-/// Filesystem access allowed under a directory grant.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum DirectoryAccess {
-    #[default]
-    ReadOnly,
-    ReadWrite,
-    /// Separate directory enumeration/mutation from file content access.
-    Custom {
-        read_directory: bool,
-        mutate_directory: bool,
-        read_files: bool,
-        write_files: bool,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DirectoryGrant {
-    pub host_path: PathBuf,
-    pub guest_path: String,
-    pub access: DirectoryAccess,
-}
-
-pub enum RequestMethod {
-    Get,
-    Post,
-    Put,
-    Delete,
-    Patch,
-    Head,
-    Options,
-}
-
-/// An outbound destination approved by host policy.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetworkEndpoint {
-    /// Exact DNS name or IP literal, not a URL or wildcard pattern.
-    pub host: String,
-    pub port: u16,
-    pub method: RequestMethod,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum NetworkPolicy {
-    #[default]
-    Deny,
-    /// Convenience policy for outbound TCP to these destinations only.
-    /// UDP, local binds/listeners and guest DNS lookup remain denied.
-    /// Host-mediated resolution must pin approved addresses before connecting.
-    AllowEndpoint(Vec<NetworkEndpoint>),
-    Allow(NetworkGrants),
-}
-
-/// Complete raw socket policy. All lists are allow-lists; empty means denied.
-///
-/// Enforce both address family and operation restrictions. DNS authorization
-/// never grants permission to connect to the resulting addresses. Check every
-/// resolved address and every UDP datagram destination. Approved listening sockets
-/// may accept connections; accepted sockets carry authority for their peer.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NetworkGrants {
-    pub ipv4: Access,
-    pub ipv6: Access,
-    pub tcp: TcpGrants,
-    pub udp: UdpGrants,
-    /// Exact names the guest may resolve. Deny requires omitting or replacing
-    /// name lookup; Wasmtime's global lookup toggle cannot enforce a name list.
-    pub name_lookup: Grant<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TcpGrants {
-    pub create_socket: Access,
-    pub connect: Vec<NetworkEndpoint>,
-    /// Exact local addresses, including ports; port zero permits an ephemeral port.
-    pub bind: Vec<std::net::SocketAddr>,
-    /// Local endpoints allowed to listen; they must also be approved for bind.
-    pub listen: Vec<std::net::SocketAddr>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct UdpGrants {
-    pub create_socket: Access,
-    pub bind: Vec<std::net::SocketAddr>,
-    /// Approved peers for connected and unconnected datagrams.
-    pub send_to: Vec<NetworkEndpoint>,
-    /// Approved source IP addresses and ports for incoming datagrams.
-    pub receive_from: Vec<std::net::SocketAddr>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HttpScheme {
-    Http,
-    Https,
-}
-
-/// Exact outgoing HTTP origin. Raw socket grants do not authorize HTTP or vice versa.
-/// The host must check every request/redirect and enforce the approved destination
-/// during DNS resolution and connection establishment, including proxy use.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HttpEndpoint {
-    pub scheme: HttpScheme,
-    pub endpoint: NetworkEndpoint,
-}
-
-/// WASI settings approved by host policy for one invocation.
-///
-/// Defaults select P2, closed stdin, discarded stdout/stderr, no environment
-/// variables or directory grants, and denied network access. Clock and random
-/// services are not configured by this type.
-///
-/// Constructing this value does not enforce permissions. The runtime must check
-/// requests against host policy and apply the approved settings to WASI.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WasiConfig {
-    pub inherit_stdin: bool,
-    pub inherit_stdout: bool,
-    pub inherit_stderr: bool,
-    /// Explicit guest environment variables; do not inherit the host environment.
-    pub env: Vec<(String, String)>,
-    pub directories: Vec<DirectoryGrant>,
-    pub network: NetworkPolicy,
-}
-
-pub struct SATRuntime {}
-
-impl SATRuntime {
-    pub fn new() -> Self {
-        return SATRuntime {  };
-    }
-    /// Check whether a tool directory exists within WAT_HOME.
-    /// This does not validate its WASM/WIT files or grant execution authority.
-    pub fn verify_path(tool_name: String) -> io::Result<bool> {
-        let home = env::var_os("WAT_HOME")
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "WAT_HOME is not set or is empty"))?;
-
-        // A registered tool name must be one portable directory name.
-        let mut components = Path::new(&tool_name).components();
-        if tool_name.contains(['/', '\\', ':'])
-            || !matches!(components.next(), Some(Component::Normal(_)))
-            || components.next().is_some()
+impl HttpPolicy {
+    pub fn permits(&self, method: &http::Method, uri: &http::Uri) -> bool {
+        if !self.allowed
+            || !matches!(uri.scheme_str(), Some("http" | "https"))
+            || uri.authority().is_none_or(|a| a.as_str().contains('@'))
         {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "tool name must be a single directory name",
-            ));
+            return false;
         }
-
-        let home = Path::new(&home).canonicalize()?;
-        let tool_path = match home.join(tool_name).canonicalize() {
-            Ok(path) => path,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(error) => return Err(error),
+        let port = |u: &http::Uri| {
+            u.port_u16().unwrap_or(if u.scheme_str() == Some("https") {
+                443
+            } else {
+                80
+            })
         };
-        if tool_path == home || !tool_path.starts_with(&home) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "tool directory must remain inside WAT_HOME",
-            ));
+        self.package.http.as_ref().is_none_or(|rules| {
+            rules.iter().any(|r| {
+                let origin: http::Uri = r.origin.parse().expect("validated policy");
+                r.methods.iter().any(|m| m == method.as_str())
+                    && uri.scheme_str() == origin.scheme_str()
+                    && uri
+                        .host()
+                        .zip(origin.host())
+                        .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+                    && port(uri) == port(&origin)
+                    && r.paths.iter().any(|p| p == uri.path())
+            })
+        })
+    }
+}
+impl HttpPolicy {
+    fn authorize<B>(&self, request: &mut Request<B>) -> Result<(), Error> {
+        if !self.permits(request.method(), request.uri()) {
+            return Err(Error::HttpRequestDenied);
         }
-
-        Ok(tool_path.metadata()?.is_dir())
+        if let Some(credential) = &self.credential {
+            let scope = HttpPolicy {
+                allowed: true,
+                package: credential.scope.clone(),
+                credential: None,
+                #[cfg(test)]
+                fixture: None,
+            };
+            if !scope.permits(request.method(), request.uri()) {
+                return Err(Error::HttpRequestDenied);
+            }
+            request
+                .headers_mut()
+                .insert(credential.header.clone(), credential.value.clone());
+        }
+        let host = request.uri().authority().unwrap().as_str().parse().unwrap();
+        request.headers_mut().insert(http::header::HOST, host);
+        Ok(())
+    }
+}
+impl WasiHttpHooks for HttpPolicy {
+    fn is_forbidden_header(&mut self, name: &http::HeaderName) -> bool {
+        self.credential.as_ref().is_some_and(|c| &c.header == name)
+            || wasmtime_wasi_http::DEFAULT_FORBIDDEN_HEADERS.contains(name)
     }
 
-    /// Execute a tool with approved capabilities and ordered arguments.
-    ///
-    /// Preserve each argument separately: `--pattern 'fn run'` becomes
-    /// two arguments, `--pattern` and `fn run`, without shell quotes.
-    /// The configuration selects the WASI version and approved host access.
-    /// Execution and capability enforcement are not implemented yet.
-    /// todo: -p should be recognized as well
-    pub fn execute(
-        tool_name: &str,
-        config: &WasiConfig,
-        tool_args: &[OsString],
-    ) -> io::Result<bool> {
-        let mut builder = WasiCtxBuilder::new();
-        // todo: fix this parsing logic here!
-        let args: Vec<&str> = tool_args.map(|arg| arg.to_str().ok_or_else(|| {io::Error("some error")})).collect::<io::Result<_>>()?;
-        bulider.arg(tool_name);
-        builder.args(args);
-        let wasi = builder.build();
-        // todo: how to run this?
+    fn send_request(
+        &mut self,
+        mut request: Request<WasiBody>,
+        _: Option<RequestOptions>,
+        _: IoFuture,
+    ) -> ResponseFuture {
+        if let Err(error) = self.authorize(&mut request) {
+            return Box::new(async move { Err(error) });
+        }
+        #[cfg(test)]
+        if let Some(fixture) = self.fixture {
+            return Box::new(async move {
+                let body: WasiBody = http_body_util::Full::new(fixture.into())
+                    .map_err(Error::from)
+                    .boxed_unsync();
+                Ok((Response::new(body), Box::new(async { Ok(()) }) as IoFuture))
+            });
+        }
+        Box::new(async move {
+            let options = RequestOptions {
+                connect_timeout: Some(Duration::from_secs(10)),
+                first_byte_timeout: Some(Duration::from_secs(20)),
+                between_bytes_timeout: Some(Duration::from_secs(10)),
+            };
+            // Wasmtime's transport sends one request; it does not follow redirects.
+            let (response, io) =
+                wasmtime_wasi_http::default_send_request(request, Some(options)).await?;
+            Ok((
+                response.map(BodyExt::boxed_unsync),
+                Box::new(io) as IoFuture,
+            ))
+        })
+    }
+}
 
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "tool execution is not implemented",
-        ))
+pub struct State {
+    pub(crate) wasi: WasiCtx,
+    http: WasiHttpCtx,
+    pub(crate) table: ResourceTable,
+    pub(crate) grant_roots: Vec<(String, crate::grants::GrantRoot)>,
+    pub(crate) descriptor_paths: std::collections::BTreeMap<u32, String>,
+    pub(crate) guest_cwd: Option<String>,
+    pub(crate) single_files: Vec<(wasmtime_wasi::filesystem::File, String)>,
+    policy: HttpPolicy,
+    pub files: files::Bindings,
+    limits: StoreLimits,
+}
+impl WasiView for State {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
+    }
+}
+impl WasiHttpView for State {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            ctx: &mut self.http,
+            table: &mut self.table,
+            hooks: &mut self.policy,
+        }
+    }
+}
+
+pub struct Tool {
+    pub package: Package,
+    engine: Engine,
+    component: Component,
+    linker: Linker<State>,
+    pub params: Vec<(String, Type)>,
+    pub caps: Vec<Capability>,
+    pub uses_http: bool,
+}
+impl Tool {
+    pub fn load(bytes: &[u8]) -> Result<Self> {
+        let package = Package::read(bytes)?;
+        let mut config = Config::new();
+        config.consume_fuel(true);
+        // Favor interactive startup; compiled code is reused by the cache.
+        config.cranelift_opt_level(wasmtime::OptLevel::None);
+        // Cache compiled code in the same trusted local state as the registry.
+        let cache_config: wasmtime::CacheConfig = serde_json::from_value(json!({
+            "directory": crate::home()?.join(".cache")
+        }))?;
+        config.cache(Some(wasmtime::Cache::new(cache_config)?));
+        let engine = Engine::new(&config)?;
+        let component = Component::new(&engine, bytes)?;
+        let component_type = component.component_type();
+        let export = component_type
+            .get_export(&engine, &package.tool.entrypoint)
+            .context("entrypoint is not exported")?;
+        let ComponentItem::ComponentFunc(func) = export.ty else {
+            bail!("entrypoint must be a root function");
+        };
+        ensure!(!func.async_(), "MVP supports P2 synchronous exports");
+        let params: Vec<_> = func.params().map(|(n, t)| (n.to_owned(), t)).collect();
+        for (_, ty) in &params {
+            ensure!(
+                supported(ty),
+                "MVP arguments support string, bool, scalar numbers and options of those types"
+            );
+        }
+        let caps = files::discover(&engine, &component)?;
+        let mut names: BTreeSet<String> = ["help", "json", "allow-http", "read", "read-write"]
+            .map(str::to_owned)
+            .into();
+        let mut shorts = BTreeSet::from(['h']);
+        for option in package.tool.options.values() {
+            if let Some(short) = option.short {
+                ensure!(
+                    short.is_ascii_alphabetic() && shorts.insert(short),
+                    "invalid or duplicate short option -{short}"
+                );
+            }
+        }
+        let mut mapped = BTreeSet::new();
+        for name in package
+            .tool
+            .arguments
+            .iter()
+            .map(|a| &a.name)
+            .chain(package.tool.options.keys())
+        {
+            ensure!(
+                valid_name(name) && names.insert(name.clone()),
+                "invalid or duplicate CLI name: {name}"
+            );
+            let (_, ty) = params
+                .iter()
+                .find(|(n, _)| n == name)
+                .with_context(|| format!("unknown WIT parameter {name}"))?;
+            if let Some(default) = package
+                .tool
+                .options
+                .get(name)
+                .and_then(|o| o.default.as_ref())
+            {
+                parse_value(ty, &default_text(default)?)?;
+            }
+            mapped.insert(name.clone());
+        }
+        ensure!(
+            mapped.len() == params.len(),
+            "metadata must describe every entrypoint parameter"
+        );
+        let mut optional_seen = false;
+        for argument in &package.tool.arguments {
+            let ty = &params.iter().find(|(n, _)| n == &argument.name).unwrap().1;
+            let optional = matches!(ty, Type::Option(_));
+            ensure!(
+                !optional_seen || optional,
+                "required positional arguments must precede optional ones"
+            );
+            optional_seen |= optional;
+        }
+        let choice = &package.tool.exactly_one_of;
+        if !choice.is_empty() {
+            ensure!(
+                choice.len() >= 2,
+                "exactly_one_of requires at least two parameters"
+            );
+            let mut unique = BTreeSet::new();
+            for name in choice {
+                ensure!(
+                    unique.insert(name)
+                        && params
+                            .iter()
+                            .any(|(n, t)| n == name && matches!(t, Type::Option(_))),
+                    "exactly_one_of must name distinct optional WIT parameters: {name}"
+                );
+                ensure!(
+                    package
+                        .tool
+                        .options
+                        .get(name)
+                        .is_none_or(|o| o.default.is_none()),
+                    "exactly_one_of parameters cannot have defaults"
+                );
+            }
+        }
+        for cap in &caps {
+            ensure!(
+                valid_name(&cap.name) && names.insert(cap.name.clone()),
+                "invalid or conflicting resource name {}",
+                cap.name
+            );
+        }
+        for (rules, directory) in [
+            (&package.policy.files, false),
+            (&package.policy.folders, true),
+        ] {
+            for rule in rules.iter().flatten() {
+                ensure!(
+                    caps.iter()
+                        .any(|c| c.name == rule.name && c.directory == directory),
+                    "policy names an unknown resource {}",
+                    rule.name
+                );
+            }
+        }
+        let uses_http = component_type
+            .imports(&engine)
+            .any(|(n, _)| n.starts_with("wasi:http/outgoing-handler@"));
+        ensure!(
+            uses_http || package.policy.http.as_ref().is_none_or(Vec::is_empty),
+            "HTTP policy supplied for a component without outgoing HTTP"
+        );
+        let mut linker = Linker::new(&engine);
+        wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+        wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
+        files::link(&mut linker, &caps)?;
+        crate::grants::link(&mut linker)?;
+        // Resolves imports and checks their types without executing guest code.
+        linker.instantiate_pre(&component)?;
+        Ok(Self {
+            package,
+            engine,
+            component,
+            linker,
+            params,
+            caps,
+            uses_http,
+        })
+    }
+
+    fn optional(&self, name: &str) -> bool {
+        self.params
+            .iter()
+            .any(|(n, t)| n == name && matches!(t, Type::Option(_)))
+    }
+
+    pub fn command(&self) -> Result<Command> {
+        let mut cmd = Command::new(self.package.tool.name.clone())
+            .about(self.package.tool.description.clone())
+            .version(self.package.tool.version.clone())
+            .disable_version_flag(true)
+            .arg(
+                Arg::new("json")
+                    .long("json")
+                    .action(ArgAction::SetTrue)
+                    .help("Print structured output/help"),
+            );
+        for name in ["read", "read-write"] {
+            cmd = cmd.arg(
+                Arg::new(name)
+                    .long(name)
+                    .value_name("HOST[::GUEST]")
+                    .action(ArgAction::Append)
+                    .help(if name == "read" {
+                        "Grant read-only access to a file or directory"
+                    } else {
+                        "Grant read/write access to a file or directory"
+                    }),
+            );
+        }
+        if self.uses_http {
+            cmd = cmd.arg(
+                Arg::new("allow-http")
+                    .long("allow-http")
+                    .action(ArgAction::SetTrue)
+                    .help("Grant outgoing HTTP within the embedded package policy"),
+            );
+        }
+        for (i, spec) in self.package.tool.arguments.iter().enumerate() {
+            cmd = cmd.arg(
+                Arg::new(spec.name.clone())
+                    .index(i + 1)
+                    .required(!self.optional(&spec.name))
+                    .help(spec.help.clone()),
+            );
+        }
+        for (name, spec) in &self.package.tool.options {
+            let mut arg = Arg::new(name.clone())
+                .long(name.clone())
+                .help(spec.help.clone());
+            if let Some(short) = spec.short {
+                arg = arg.short(short);
+            }
+            if let Some(value) = &spec.default {
+                arg = arg.default_value(default_text(value)?);
+            } else {
+                arg = arg.required(!self.optional(name));
+            }
+            cmd = cmd.arg(arg);
+        }
+        if !self.package.tool.exactly_one_of.is_empty() {
+            cmd = cmd.group(
+                ArgGroup::new("@sat:exactly-one")
+                    .args(self.package.tool.exactly_one_of.clone())
+                    .required(true)
+                    .multiple(false),
+            );
+        }
+        for cap in &self.caps {
+            cmd = cmd.arg(
+                Arg::new(cap.name.clone())
+                    .long(cap.name.clone())
+                    .required(true)
+                    .value_name("PATH")
+                    .help(format!(
+                        "Bind a {} ({})",
+                        if cap.directory { "directory" } else { "file" },
+                        if cap.write {
+                            "writable unless restricted by policy"
+                        } else {
+                            "read-only"
+                        }
+                    )),
+            );
+        }
+        if !self.package.tool.examples.is_empty() {
+            cmd = cmd.after_help(format!(
+                "Examples:\n{}",
+                self.package
+                    .tool
+                    .examples
+                    .iter()
+                    .map(|e| format!("  {}", e.command))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
+        Ok(cmd)
+    }
+
+    pub async fn run(&self, args: &[String]) -> Result<()> {
+        if args.iter().any(|a| a == "--help" || a == "-h") && args.iter().any(|a| a == "--json") {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "tool": self.package.tool, "policy": self.package.policy,
+                    "parameters": self.params.iter().map(|(name,t)| json!({"name":name,"type":format!("{t:?}")})).collect::<Vec<_>>(),
+                    "resources": self.caps, "requires_http_grant": self.uses_http,
+                    "filesystem_grants": ["--read PATH", "--read-write PATH"],
+                }))?
+            );
+            return Ok(());
+        }
+        // SAT and generated tool options share one parser. Accept a separator
+        // between host grants and tool options, without changing option values.
+        let mut args = args.to_vec();
+        if let Some(index) = args.iter().position(|a| a == "--") {
+            args.remove(index);
+        }
+        let matches = match self.command()?.try_get_matches_from(
+            std::iter::once(self.package.tool.name.clone()).chain(args.iter().cloned()),
+        ) {
+            Ok(m) => m,
+            Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp => {
+                print!("{e}");
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let params = self
+            .params
+            .iter()
+            .map(|(n, t)| match matches.get_one::<String>(n) {
+                Some(value) => parse_value(t, value),
+                None if matches!(t, Type::Option(_)) => Ok(Val::Option(None)),
+                None => bail!("missing parameter {n}"),
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut bindings = files::Bindings::new();
+        for cap in &self.caps {
+            bindings.insert(
+                cap.name.clone(),
+                files::open(
+                    cap,
+                    Path::new(matches.get_one::<String>(&cap.name).unwrap()),
+                    &self.package.policy,
+                )
+                .with_context(|| format!("cannot bind {}", cap.name))?,
+            );
+        }
+        let mut wasi = WasiCtxBuilder::new();
+        wasi.allow_tcp(false)
+            .allow_udp(false)
+            .allow_ip_name_lookup(false);
+        let (single_files, guest_cwd) =
+            crate::grants::configure(&mut wasi, &matches, &self.package.policy)?;
+        // No inherited stdio/environment or raw sockets; clocks/random use WASI defaults.
+        let mut store = Store::new(
+            &self.engine,
+            State {
+                wasi: wasi.build(),
+                single_files,
+                guest_cwd,
+                grant_roots: Vec::new(),
+                descriptor_paths: Default::default(),
+                http: WasiHttpCtx::new(),
+                table: ResourceTable::new(),
+                policy: HttpPolicy {
+                    allowed: self.uses_http && matches.get_flag("allow-http"),
+                    package: self.package.policy.clone(),
+                    #[cfg(test)]
+                    fixture: None,
+                    credential: if self.uses_http && matches.get_flag("allow-http") {
+                        crate::credentials::load(&self.package.tool.name)?
+                    } else {
+                        None
+                    },
+                },
+                files: bindings,
+                limits: StoreLimitsBuilder::new()
+                    .memory_size(64 * 1024 * 1024)
+                    .build(),
+            },
+        );
+        store.limiter(|s| &mut s.limits);
+        store.set_fuel(50_000_000)?;
+        let result = tokio::time::timeout(Duration::from_secs(30), async {
+            let instance = self
+                .linker
+                .instantiate_async(&mut store, &self.component)
+                .await?;
+            let f = instance
+                .get_func(&mut store, &self.package.tool.entrypoint)
+                .context("missing entrypoint")?;
+            let mut results = vec![Val::Bool(false); f.ty(&store).results().len()];
+            f.call_async(&mut store, &params, &mut results).await?;
+            let mut output = results.iter().map(to_json).collect::<Result<Vec<_>>>()?;
+            Ok::<_, anyhow::Error>(if output.len() == 1 {
+                output.remove(0)
+            } else {
+                Json::Array(output)
+            })
+        })
+        .await
+        .context("tool exceeded 30 seconds")??;
+        if !matches.get_flag("json")
+            && let Json::String(text) = &result
+        {
+            println!("{text}");
+        } else {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        Ok(())
+    }
+}
+
+fn supported(t: &Type) -> bool {
+    if let Type::Option(inner) = t {
+        return !matches!(inner.ty(), Type::Option(_)) && supported(&inner.ty());
+    }
+    matches!(
+        t,
+        Type::String
+            | Type::Bool
+            | Type::U32
+            | Type::U64
+            | Type::S32
+            | Type::S64
+            | Type::Float32
+            | Type::Float64
+    )
+}
+fn default_text(v: &toml::Value) -> Result<String> {
+    Ok(match v {
+        toml::Value::String(s) => s.clone(),
+        toml::Value::Integer(_) | toml::Value::Boolean(_) | toml::Value::Float(_) => v.to_string(),
+        _ => bail!("default must be a scalar"),
+    })
+}
+fn parse_value(ty: &Type, text: &str) -> Result<Val> {
+    Ok(match ty {
+        Type::Option(inner) => Val::Option(Some(Box::new(parse_value(&inner.ty(), text)?))),
+        Type::String => Val::String(text.into()),
+        Type::Bool => Val::Bool(text.parse()?),
+        Type::U32 => Val::U32(text.parse()?),
+        Type::U64 => Val::U64(text.parse()?),
+        Type::S32 => Val::S32(text.parse()?),
+        Type::S64 => Val::S64(text.parse()?),
+        Type::Float32 => Val::Float32(text.parse()?),
+        Type::Float64 => Val::Float64(text.parse()?),
+        _ => bail!("unsupported CLI argument type"),
+    })
+}
+fn to_json(v: &Val) -> Result<Json> {
+    Ok(match v {
+        Val::String(s) => json!(s),
+        Val::Bool(v) => json!(v),
+        Val::U8(v) => json!(v),
+        Val::U16(v) => json!(v),
+        Val::U32(v) => json!(v),
+        Val::U64(v) => json!(v),
+        Val::S8(v) => json!(v),
+        Val::S16(v) => json!(v),
+        Val::S32(v) => json!(v),
+        Val::S64(v) => json!(v),
+        Val::Float32(v) => json!(v),
+        Val::Float64(v) => json!(v),
+        Val::List(items) | Val::Tuple(items) => {
+            Json::Array(items.iter().map(to_json).collect::<Result<_>>()?)
+        }
+        Val::Record(fields) => Json::Object(
+            fields
+                .iter()
+                .map(|(k, v)| Ok((k.clone(), to_json(v)?)))
+                .collect::<Result<_>>()?,
+        ),
+        Val::Result(Ok(Some(v))) | Val::Option(Some(v)) => to_json(v)?,
+        Val::Result(Ok(None)) | Val::Option(None) => Json::Null,
+        Val::Result(Err(v)) => bail!(
+            "tool error: {}",
+            v.as_ref()
+                .map(|v| to_json(v))
+                .transpose()?
+                .unwrap_or(Json::Null)
+        ),
+        _ => bail!("unsupported output type"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadata::HttpRule;
+
+    #[test]
+    fn http_grant_and_package_ceiling_are_both_required() {
+        let package = Policy {
+            http: Some(vec![HttpRule {
+                methods: vec!["GET".into()],
+                origin: "https://httpbin.org".into(),
+                paths: vec!["/get".into()],
+            }]),
+            ..Default::default()
+        };
+        let mut policy = HttpPolicy {
+            allowed: false,
+            package,
+            credential: None,
+            fixture: None,
+        };
+        let uri = "https://httpbin.org/get?q=hello".parse().unwrap();
+        assert!(!policy.permits(&http::Method::GET, &uri));
+        policy.allowed = true;
+        assert!(policy.permits(&http::Method::GET, &uri));
+        assert!(!policy.permits(&http::Method::POST, &uri));
+        for url in [
+            "https://example.com/get",
+            "https://httpbin.org.evil/get",
+            "http://httpbin.org/get",
+            "https://httpbin.org:444/get",
+            "https://httpbin.org/other",
+            "https://user@httpbin.org/get",
+        ] {
+            assert!(
+                !policy.permits(&http::Method::GET, &url.parse().unwrap()),
+                "{url}"
+            );
+        }
+        policy.package = Policy::default();
+        assert!(policy.permits(&http::Method::GET, &uri));
+        policy.allowed = false;
+        assert!(!policy.permits(&http::Method::GET, &uri));
+    }
+    fn brave_policy() -> HttpPolicy {
+        let scope = Policy {
+            http: Some(vec![HttpRule {
+                methods: vec!["GET".into()],
+                origin: "https://api.search.brave.com".into(),
+                paths: vec!["/res/v1/web/search".into()],
+            }]),
+            ..Default::default()
+        };
+        HttpPolicy {
+            allowed: true,
+            package: scope.clone(),
+            credential: Some(crate::credentials::Credential {
+                header: http::HeaderName::from_static("x-subscription-token"),
+                value: http::HeaderValue::from_static("test-only-secret"),
+                scope,
+            }),
+            fixture: None,
+        }
+    }
+
+    #[test]
+    fn credentials_require_both_grant_and_destination_scope() {
+        let mut policy = brave_policy();
+        let mut request = Request::builder()
+            .uri("https://api.search.brave.com/res/v1/web/search?q=hello")
+            .header("host", "evil.example")
+            .body(())
+            .unwrap();
+        policy.allowed = false;
+        assert!(policy.authorize(&mut request).is_err());
+        assert!(!request.headers().contains_key("x-subscription-token"));
+        policy.allowed = true;
+        policy.authorize(&mut request).unwrap();
+        assert_eq!(
+            request.headers()["x-subscription-token"],
+            "test-only-secret"
+        );
+        assert_eq!(request.headers()["host"], "api.search.brave.com");
+        assert!(policy.is_forbidden_header(&http::HeaderName::from_static("x-subscription-token")));
+        // Even an unrestricted component policy cannot widen the host's key scope.
+        policy.package = Policy::default();
+        for uri in [
+            "https://example.com/res/v1/web/search",
+            "http://api.search.brave.com/res/v1/web/search",
+            "https://api.search.brave.com/other",
+            "https://api.search.brave.com:444/res/v1/web/search",
+        ] {
+            let mut request = Request::builder().uri(uri).body(()).unwrap();
+            assert!(policy.authorize(&mut request).is_err());
+            assert!(!request.headers().contains_key("x-subscription-token"));
+        }
+        let mut post = Request::builder()
+            .method("POST")
+            .uri("https://api.search.brave.com/res/v1/web/search")
+            .body(())
+            .unwrap();
+        assert!(policy.authorize(&mut post).is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "run python3 pi-extension/setup.py first"]
+    async fn brave_component_offline() {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../pi-extension/target/brave-search.wasm");
+        let tool = Tool::load(&std::fs::read(path).unwrap()).unwrap();
+        let mut policy = brave_policy();
+        policy.fixture = Some(include_bytes!("../../brave-search-example/fixture.json"));
+        let mut wasi = WasiCtxBuilder::new();
+        wasi.allow_tcp(false)
+            .allow_udp(false)
+            .allow_ip_name_lookup(false);
+        let mut store = Store::new(
+            &tool.engine,
+            State {
+                wasi: wasi.build(),
+                http: WasiHttpCtx::new(),
+                table: ResourceTable::new(),
+                grant_roots: Vec::new(),
+                descriptor_paths: Default::default(),
+                guest_cwd: None,
+                single_files: Vec::new(),
+                files: files::Bindings::new(),
+                policy,
+                limits: StoreLimitsBuilder::new()
+                    .memory_size(64 * 1024 * 1024)
+                    .build(),
+            },
+        );
+        store.limiter(|s| &mut s.limits);
+        store.set_fuel(50_000_000).unwrap();
+        let instance = tool
+            .linker
+            .instantiate_async(&mut store, &tool.component)
+            .await
+            .unwrap();
+        let run = instance.get_func(&mut store, "run").unwrap();
+        let mut result = [Val::Bool(false)];
+        run.call_async(
+            &mut store,
+            &[Val::String("WASI components".into())],
+            &mut result,
+        )
+        .await
+        .unwrap();
+        let value = to_json(&result[0]).unwrap();
+        assert_eq!(value[0]["title"], "Offline example result");
+        assert!(!value.to_string().contains("test-only-secret"));
+        let probe = instance.get_func(&mut store, "sandbox-probe").unwrap();
+        probe
+            .call_async(&mut store, &[], &mut result)
+            .await
+            .unwrap();
+        assert_eq!(to_json(&result[0]).unwrap(), Json::Null);
     }
 }

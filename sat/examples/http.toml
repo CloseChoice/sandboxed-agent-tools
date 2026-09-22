@@ -1,0 +1,15 @@
+name = "httpbin"
+version = "0.1.0"
+description = "Send a GET to httpbin and return its mirrored JSON."
+entrypoint = "run"
+
+[[arguments]]
+name = "url"
+help = "Request URL (restricted by the embedded policy)."
+
+[options.method]
+default = "GET"
+help = "HTTP method."
+
+[[examples]]
+command = 'sat httpbin "https://httpbin.org/get?hello=world" --allow-http'

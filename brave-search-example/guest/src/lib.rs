@@ -16,6 +16,18 @@ impl Guest for BraveSearch {
 }
 
 impl bindings::Guest for BraveSearch {
+    fn run(query: String) -> Result<Vec<bindings::SearchHit>, String> {
+        search(&query).map(|hits| {
+            hits.into_iter()
+                .map(|hit| bindings::SearchHit {
+                    title: hit.title,
+                    url: hit.url,
+                    description: hit.description,
+                })
+                .collect()
+        })
+    }
+
     fn sandbox_probe() -> Result<(), String> {
         probe()
     }

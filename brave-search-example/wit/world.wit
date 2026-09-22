@@ -14,6 +14,13 @@ interface search {
 world brave-search {
     import wasi:http/outgoing-handler@0.2.12;
     export search;
+    record search-hit {
+        title: string,
+        url: string,
+        description: string,
+    }
+    /// SAT root entrypoint; the standalone interface remains available.
+    export run: func(query: string) -> result<list<search-hit>, string>;
     /// Demonstration-only security probes used by the offline integration test.
     export sandbox-probe: func() -> result<_, string>;
 }

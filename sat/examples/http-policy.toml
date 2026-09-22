@@ -1,0 +1,4 @@
+[[http]]
+methods = ["GET"]
+origin = "https://httpbin.org"
+paths = ["/get"]

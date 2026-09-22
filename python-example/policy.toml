@@ -1,0 +1,2 @@
+# Filesystem access requires explicit invocation grants.
+http = []

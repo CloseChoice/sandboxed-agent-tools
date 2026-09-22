@@ -1,0 +1,17 @@
+{
+  "name": "sat-pi-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "pi": { "extensions": ["./sat.ts"] },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test.ts"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.0",
+    "@earendil-works/pi-ai": "0.87.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

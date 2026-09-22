@@ -1,0 +1,19 @@
+name = "python"
+version = "0.1.0"
+description = "Run Python code inside a WASI sandbox."
+entrypoint = "run"
+exactly_one_of = ["code", "script"]
+
+[[arguments]]
+name = "script"
+help = "Python file to execute (requires a read grant)."
+
+[options.code]
+short = "c"
+help = "Python code to execute."
+
+[[examples]]
+command = 'sat python -c "print(1 + 2)"'
+
+[[examples]]
+command = 'sat python script.py --read script.py'

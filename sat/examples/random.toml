@@ -1,0 +1,4 @@
+name = "random"
+version = "0.1.0"
+description = "Return a random unsigned 64-bit integer."
+entrypoint = "run"
