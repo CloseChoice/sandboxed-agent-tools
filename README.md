@@ -165,3 +165,102 @@ python3 tests/cli.test.py # Requires grep for context-output comparisons
 
 This checks matching, line numbers, grep-compatible context, Unicode, and denial of reads without a
 grant or outside the granted folder, including traversal and symlink escapes.
+
+## Proposed SAT tool package and CLI design
+
+Proposed behavior, not implemented yet. One `.wasm` component is the authoritative
+package; separate WIT/TOML files are extractable inspection copies.
+
+| Contents | Location |
+| --- | --- |
+| Code, imports, exports, and interface types | Standard component encoding; used to extract WIT |
+| Name, version, description, entrypoint, CLI argument/option descriptions, defaults, examples | Required `sat.tool.v1` custom section, containing UTF-8 TOML |
+| Permanent HTTP and file/folder restrictions | Optional `sat.policy.v1` custom section, containing UTF-8 TOML |
+
+Both custom sections belong on the outermost component. SAT reads them without
+executing guest code. Ordinary Wasmtime does not enforce SAT metadata; SAT's
+host implements the restrictions. Extracted WIT may not preserve source comments.
+
+### CLI metadata: `sat.tool.v1`
+
+Given the exported WIT function:
+
+```wit
+export run: func(query: string, count: u32) -> result<string, string>;
+```
+
+The tool metadata could be:
+
+```toml
+name = "brave-search"
+version = "0.1.0"
+description = "Search the web using Brave."
+entrypoint = "run"
+
+[[arguments]]
+name = "query"
+help = "The search query."
+
+[options.count]
+default = 5
+help = "Maximum number of results."
+
+[[examples]]
+command = 'sat brave-search "WASI components" --count 10'
+```
+
+Argument/option names match WIT parameter names; types come from WIT. No `bind`
+or `type` field is needed. SAT supplies values in WIT parameter order. Parameters
+without defaults are required. Keyed option tables let the TOML parser reject
+duplicate definitions such as `[options.count]`.
+
+SAT generates `sat brave-search --help` and `--help --json` without executing the
+guest. SAT reserves these help flags.
+
+### Permanent restrictions: `sat.policy.v1`
+
+```toml
+[[http]]
+methods = ["GET"]
+origin = "https://api.search.brave.com"
+paths = ["/res/v1/web/search"]
+```
+
+CLI input may change the search query, but cannot widen the allowed method,
+origin (scheme, host, port), or exact path. Query parameters are separate from
+path matching. Redirect destinations must satisfy the same policy or be denied.
+File/folder restrictions follow the same ceiling model; their TOML schema remains
+to be specified.
+
+WIT-defined named resources can be bound at invocation time, for example
+`sat tool --documents=./documents --templates=./templates`. SAT needs explicit
+WIT-to-CLI resource conventions; standard WASI imports alone do not identify
+these names or read/write modes. Host implementations enforce resource access.
+No duplicate policy declaration is needed unless extra restrictions are wanted.
+Ordinary path strings do not grant access.
+
+Effective authority is the intersection of invocation grants, package restrictions,
+and host policy. **Missing policy means no additional package restrictions**, not
+automatic authority. CLI input cannot override embedded restrictions.
+
+### Validation and integrity
+
+Before execution, SAT must:
+
+1. Verify the final binary against a trusted registry digest or authenticated
+   signature. Hash/sign **after** embedding both sections. Replacing or removing
+   metadata changes package identity and invalidates previous verification and
+   approval; a replaceable adjacent hash file is insufficient.
+2. Validate the component and read its actual imports, exports, and types.
+3. Require one `sat.tool.v1` section and at most one `sat.policy.v1` section at
+   the outermost level. Reject duplicates, invalid TOML, unsupported metadata
+   versions, unknown fields, and invalid values. Invalid policy is never absence.
+4. Validate the entrypoint, argument/option names, defaults, unique mappings,
+   reserved flags, and parameter coverage against the component's types. If an
+   external WIT file is supplied, compare resolved interfaces structurally,
+   not by comparing formatted `wasm-tools` output.
+5. Reject unsupported host imports and incompatible policy declarations. Imports
+   reveal required interfaces, not which URLs or files guest code will use.
+6. Resolve approved invocation grants, apply permanent restrictions and host
+   policy, then instantiate with restricted resources and host functions.
+   Enforce HTTP rules on every request and filesystem rights on every operation.
