@@ -1,0 +1,16 @@
+schema_version = 1
+id = "brave-search"
+component = "target/wasm32-wasip2/debug/brave_search_guest.wasm"
+
+[entrypoint]
+interface = "example:brave-search/search@0.1.0"
+function = "search"
+
+# Requirements, not automatic grants. The operator must approve these permissions.
+# Filesystem access, guest environment inheritance, and raw sockets remain denied.
+[permissions.http]
+origin = "https://api.search.brave.com"
+methods = ["GET"]
+paths = ["/res/v1/web/search"]
+credential = "search-api"
+header = "x-subscription-token"

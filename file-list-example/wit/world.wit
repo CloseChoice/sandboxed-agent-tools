@@ -1,0 +1,11 @@
+package example:file-list@0.1.0;
+
+world file-list {
+    import wasi:filesystem/preopens@0.2.12;
+
+    /// Reads only the file already opened by the host. No path can be supplied.
+    import read-file: func() -> result<string, string>;
+
+    /// Lists /listing, then appends the selected file's text.
+    export run: func(file-name: string) -> result<string, string>;
+}

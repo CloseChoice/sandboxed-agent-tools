@@ -1,5 +1,6 @@
 """Exercise the real WASIp2 component and Wasmtime filesystem boundary."""
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -30,8 +31,8 @@ with tempfile.TemporaryDirectory(prefix="file-search-test-") as tmp:
     result = run("needle", "/data/a.txt", "/data/unicode.txt")
     assert result.returncode == 0, result.stderr
     assert result.stdout == (
-        "/data/a.txt:2:needle here\n/data/a.txt:4:needle again\n"
-        "/data/unicode.txt:2:needle café\n"
+        "/data/a.txt:2 needle here\n/data/a.txt:4 needle again\n"
+        "/data/unicode.txt:2 needle café\n"
     ), result.stdout
     result = run("absent", "/data/a.txt")
     assert result.returncode == 1 and not result.stdout, result
@@ -62,6 +63,8 @@ with tempfile.TemporaryDirectory(prefix="file-search-test-") as tmp:
             ["grep", "-H", "-n", "-F", *options, "hit", *[str(allowed / p) for p in paths]],
             capture_output=True, text=True, check=True,
         ).stdout.replace(str(allowed), "/data")
+        # Match lines use a space after the line number; context follows grep.
+        expected = re.sub(r"^(/data/[^:\n]+:\d+):", r"\1 ", expected, flags=re.MULTILINE)
         result = run(*options, "hit", *[f"/data/{p}" for p in paths])
         assert result.returncode == 0 and result.stdout == expected, (options, result, expected)
     result = run("-C1", "needle", "/data/a.txt", "/data/unicode.txt")
@@ -74,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix="file-search-test-") as tmp:
     (allowed / "dash.txt").write_text("before\n--help\nafter\n")
     result = run("-C1", "--", "--help", "/data/dash.txt")
     assert result.returncode == 0 and result.stdout == (
-        "/data/dash.txt-1-before\n/data/dash.txt:2:--help\n/data/dash.txt-3-after\n"
+        "/data/dash.txt-1-before\n/data/dash.txt:2 --help\n/data/dash.txt-3-after\n"
     ), result
 
 print("CLI tests passed: matches, grep-compatible context, Unicode, exit codes, and denied filesystem access")

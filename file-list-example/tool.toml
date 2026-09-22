@@ -1,0 +1,6 @@
+component = "target/wasm32-wasip2/debug/file_list_component.wasm"
+
+# Paths are relative to this TOML file. Both grants are read-only.
+[permissions]
+directory = "sample/directory"
+file = "sample/message.txt"

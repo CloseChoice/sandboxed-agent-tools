@@ -14,7 +14,7 @@ fn run() -> Result<bool, String> {
             .ok_or("usage: file-search [-A N] [-B N] [-C N] [--] QUERY FILE...")?;
         if arg == "--help" || arg == "-h" {
             println!(
-                "usage: file-search [-A N] [-B N] [-C N] [--] QUERY FILE...\n-A N: lines after; -B N: lines before; -C N: both sides.\n-A and -B override -C for their side. Options precede QUERY; -A2 also works.\nLiteral, case-sensitive UTF-8 search. Matches: FILE:LINE:TEXT; context: FILE-LINE-TEXT.\nExit codes: 0 matches, 1 no matches or error (errors go to stderr). Files require WASI directory grants."
+                "usage: file-search [-A N] [-B N] [-C N] [--] QUERY FILE...\n-A N: lines after; -B N: lines before; -C N: both sides.\n-A and -B override -C for their side. Options precede QUERY; -A2 also works.\nLiteral, case-sensitive UTF-8 search. Matches: FILE:LINE TEXT; context: FILE-LINE-TEXT.\nExit codes: 0 matches, 1 no matches or error (errors go to stderr). Files require WASI directory grants."
             );
             return Ok(true);
         }
@@ -93,7 +93,7 @@ fn run() -> Result<bool, String> {
                     for (i, text) in pending.drain(..) {
                         writeln!(output, "{path}-{}-{text}", i + 1)?;
                     }
-                    writeln!(output, "{path}:{}:{line}", index + 1)?;
+                    writeln!(output, "{path}:{} {line}", index + 1)?;
                     matched = true;
                     printed_any = true;
                     last_printed = Some(index);
