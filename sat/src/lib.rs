@@ -1,6 +1,7 @@
 pub mod files;
 pub mod metadata;
 pub mod permissions;
+pub mod python_venv;
 pub mod runtime;
 
 use anyhow::{Context, Result};

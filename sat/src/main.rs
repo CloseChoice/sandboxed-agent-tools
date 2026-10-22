@@ -53,8 +53,32 @@ enum Action {
         #[arg(long)]
         policy: bool,
     },
+    /// Build and register an isolated WASI Python environment.
+    PythonVenv {
+        #[command(subcommand)]
+        command: PythonVenvAction,
+    },
     #[command(external_subcommand)]
     Run(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum PythonVenvAction {
+    /// Install wheel-only Python requirements into a new WASI component.
+    Install {
+        /// Requirements, e.g. 'numpy==2.2.0' (repeatable).
+        #[arg(required = true)]
+        requirements: Vec<String>,
+        /// Name under which SAT registers the resulting Python tool.
+        #[arg(long)]
+        name: String,
+        /// Registry name from SAT_HOME/python-registries.toml.
+        #[arg(long, default_value = "pypi")]
+        registry: String,
+        /// Replace an existing registration with this name.
+        #[arg(long)]
+        replace: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -116,6 +140,30 @@ fn list(query: &str, json_output: bool) -> Result<()> {
     Ok(())
 }
 
+fn install_bytes(bytes: Vec<u8>, replace: bool) -> Result<()> {
+    let tool = Tool::load(&bytes)?;
+    let info = &tool.package.tool;
+    let dir = tool_dir(&info.name)?;
+    ensure!(
+        !dir.exists() || replace,
+        "already installed; use --replace to explicitly trust this replacement"
+    );
+    fs::create_dir_all(&dir)?;
+    let record = Registration {
+        name: info.name.clone(),
+        version: info.version.clone(),
+        description: info.description.clone(),
+        sha256: digest(&bytes),
+    };
+    fs::write(dir.join("tool.wasm"), bytes)?;
+    fs::write(
+        dir.join("registration.json"),
+        serde_json::to_vec_pretty(&record)?,
+    )?;
+    println!("Installed {} {}", info.name, info.version);
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
@@ -133,27 +181,7 @@ async fn main() -> Result<()> {
             println!("{}  sha256:{}", output.display(), digest(&bytes));
         }
         Action::Install { component, replace } => {
-            let bytes = fs::read(component)?;
-            let tool = Tool::load(&bytes)?;
-            let info = &tool.package.tool;
-            let dir = tool_dir(&info.name)?;
-            ensure!(
-                !dir.exists() || replace,
-                "already installed; use --replace to explicitly trust this replacement"
-            );
-            fs::create_dir_all(&dir)?;
-            let record = Registration {
-                name: info.name.clone(),
-                version: info.version.clone(),
-                description: info.description.clone(),
-                sha256: digest(&bytes),
-            };
-            fs::write(dir.join("tool.wasm"), bytes)?;
-            fs::write(
-                dir.join("registration.json"),
-                serde_json::to_vec_pretty(&record)?,
-            )?;
-            println!("Installed {} {}", info.name, info.version);
+            install_bytes(fs::read(component)?, replace)?;
         }
         Action::List { json } => list("", json)?,
         Action::Search { query, json } => list(&query, json)?,
@@ -174,6 +202,17 @@ async fn main() -> Result<()> {
                 print!("{}", package.tool_text);
             }
         }
+        Action::PythonVenv { command } => match command {
+            PythonVenvAction::Install {
+                requirements,
+                name,
+                registry,
+                replace,
+            } => install_bytes(
+                safe_agent_tools::python_venv::build(&requirements, &name, &registry)?,
+                replace,
+            )?,
+        },
         Action::Run(args) => {
             let bytes = installed(&args[0])?;
             Tool::load(&bytes)?.run(&args[1..]).await?;

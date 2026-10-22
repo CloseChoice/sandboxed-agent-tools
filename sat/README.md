@@ -230,6 +230,62 @@ See [`python-example`](../python-example/README.md) for a separately built CPyth
 WASI tool: `sat python -c "print(1 + 2)"`. It uses the same packaging, metadata,
 and sandbox; no host-Python execution path is added to SAT.
 
+### Build a Python environment
+
+Build the pinned componentize-py toolchain once:
+
+```sh
+python3 python-example/build.py --no-install
+```
+
+Configure one or more trusted package indexes in `SAT_HOME/python-registries.toml`:
+
+```toml
+[registries.pypi]
+index_url = "https://pypi.org/simple"
+
+[registries.anaconda]
+index_url = "https://pypi.anaconda.org/conda-forge/simple"
+
+[registries.company]
+index_url_env = "SAT_JFROG_PYPI_URL"
+```
+
+The environment variable can contain the complete authenticated HTTPS index URL;
+it is read by the host-side download step only. Do not put passwords directly in
+the TOML file. Install requirements by passing package specifiers:
+
+```sh
+sat python-venv install 'requests==2.32.3' --name python_requests
+sat python-venv install 'idna==3.10' --registry company --name python_idna
+sat python_requests -c 'import requests; print(requests.__version__)'
+```
+
+SAT downloads universal wheels only (`py3-none-any`), installs their files into a
+fresh temporary tree, then runs the pinned `componentize-py` builder. The builder
+pre-initializes the Python guest under Wasmtime with the temporary app and package
+paths mapped in. Package imports and `.pth` startup hooks therefore run in that
+WASI guest; no registry credentials or network are passed to it. SAT validates
+the produced component with its normal package loader, registers it, and removes
+the temporary tree on success or failure. `SAT_BUILD_TMP` selects the temporary
+directory; `SAT_PYTHON_BUILD_TIMEOUT_SECS` sets the per-process limit (default
+600 seconds); `SAT_COMPONENTIZE_PY` can point to a separately installed pinned
+componentize-py 0.25.0 builder.
+The generated tool also embeds Python's deny-HTTP policy, so `--allow-http` does
+not grant network access to installed packages.
+
+This first implementation intentionally rejects direct package URLs and pip
+options, and does not build source distributions or native extensions. It does
+not run PEP 517 build backends. It mitigates startup payloads such as malicious
+`.pth` files by executing them in the componentizer's WASI initialization guest,
+but it does not make the package safe to run: the generated component remains
+untrusted and needs narrow runtime grants. Wheel resolution/download still occurs
+on the host, so the configured registry is trusted to serve the selected wheel
+files. The WASI pre-initialization is resource-limited by a process timeout, but
+SAT does not yet enforce a build memory or disk quota. It caches completed builds
+by tool name, sorted requirement strings, registry identity and downloaded wheel
+hashes; it still resolves/downloads wheels before checking that cache.
+
 ## Pi and Brave search
 
 See [pi-extension](../pi-extension/README.md) for the local `web_search` extension
