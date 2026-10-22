@@ -63,21 +63,29 @@ This minimal build preloads: `collections`, `datetime`, `decimal`, `fractions`,
 by submitted code after preloading, but OS operations still require capabilities.
 Not every standard-library module is included. `componentize-py` snapshots imports
 at build time; there is no runtime pip or arbitrary PyPI compatibility here.
+The current WASI CPython runtime lacks the optional `_bz2` and `_lzma` native
+extensions, so importing `bz2` or `lzma` fails even though those are standard
+library modules. NetworkX currently hits this through its import chain and cannot
+be componentized. A future runtime build can add bzip2 and LZMA support without
+adding OpenSSL; TLS support is outside the current scope. These extensions and
+their libraries should be included only after measuring the resulting component
+size.
 
-Later, build separate registered components with the same WIT interface:
+SAT can build separate registered components with the same WIT interface from
+pure-Python wheels:
 
 ```sh
 sat python_numpy -c 'import numpy; print(numpy.arange(5))'
 ```
 
-That command is a proposed future environment, not an included tool. To create it:
+To create one, configure a package registry and run `sat python-venv install` as
+described in the [SAT Python environment instructions](../sat/README.md#build-a-python-environment).
+SAT provisions its pinned host-side componentizer automatically. The current
+support is limited to universal pure-Python wheels; the componentizer itself
+still runs on the host and remains part of the trusted build surface.
 
-1. Resolve pinned packages in a trusted external builder.
-2. Supply pure-Python dependencies or native extensions actually built for the
-   chosen WASI CPython ABI; host Linux/macOS/Windows wheels will not work.
-3. Import the supported packages during componentization so they are included.
-4. Embed metadata with a distinct name such as `python_numpy`, package policy,
-   and install the resulting self-contained component through SAT.
+Packages with native extensions require artifacts built for the chosen WASI
+CPython ABI; host Linux/macOS/Windows wheels will not work.
 
 Cache future environments by a normalized specification: interpreter and builder
 versions, WASI target, sorted pinned dependencies/artifact hashes, and wrapper

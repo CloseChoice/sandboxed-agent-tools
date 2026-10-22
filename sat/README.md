@@ -232,12 +232,6 @@ and sandbox; no host-Python execution path is added to SAT.
 
 ### Build a Python environment
 
-Build the pinned componentize-py toolchain once:
-
-```sh
-python3 python-example/build.py --no-install
-```
-
 Configure one or more trusted package indexes in `SAT_HOME/python-registries.toml`:
 
 ```toml
@@ -262,7 +256,8 @@ sat python_requests -c 'import requests; print(requests.__version__)'
 ```
 
 SAT downloads universal wheels only (`py3-none-any`), installs their files into a
-fresh temporary tree, then runs the pinned `componentize-py` builder. The builder
+fresh temporary tree, provisions the pinned `componentize-py` 0.25.0 builder in
+`SAT_HOME/.cache/python-build-tools` on first use, then runs it. The builder
 pre-initializes the Python guest under Wasmtime with the temporary app and package
 paths mapped in. Package imports and `.pth` startup hooks therefore run in that
 WASI guest; no registry credentials or network are passed to it. SAT validates
@@ -270,7 +265,14 @@ the produced component with its normal package loader, registers it, and removes
 the temporary tree on success or failure. `SAT_BUILD_TMP` selects the temporary
 directory; `SAT_PYTHON_BUILD_TIMEOUT_SECS` sets the per-process limit (default
 600 seconds); `SAT_COMPONENTIZE_PY` can point to a separately installed pinned
-componentize-py 0.25.0 builder.
+componentize-py 0.25.0 builder. SAT bootstraps its default builder from public
+PyPI using an isolated Python environment, without passing package-index
+credentials to that bootstrap. The componentize-py version is pinned, but its
+transitive Python dependencies are currently resolved by pip at bootstrap time
+and are not locked by hashes; those dependencies also run in the host build
+process and belong to its trusted supply chain. A host Python 3 installation
+with `pip` and `venv` is required; SAT uses it for wheel handling and builder
+provisioning, but does not execute the installed package code with host Python.
 The generated tool also embeds Python's deny-HTTP policy, so `--allow-http` does
 not grant network access to installed packages.
 
@@ -281,7 +283,12 @@ not run PEP 517 build backends. It mitigates startup payloads such as malicious
 but it does not make the package safe to run: the generated component remains
 untrusted and needs narrow runtime grants. Wheel resolution/download still occurs
 on the host, so the configured registry is trusted to serve the selected wheel
-files. The WASI pre-initialization is resource-limited by a process timeout, but
+files. **The pinned componentizer itself currently runs as a host process.** It
+receives a clean environment and the staged venv path, but still has the host
+user's operating-system authority. A vulnerability in the componentizer or its
+host-side dependencies could therefore compromise the host; moving the builder
+inside an outer WASI sandbox is a future hardening step. The WASI
+pre-initialization is resource-limited by a process timeout, but
 SAT does not yet enforce a build memory or disk quota. It caches completed builds
 by tool name, sorted requirement strings, registry identity and downloaded wheel
 hashes; it still resolves/downloads wheels before checking that cache.

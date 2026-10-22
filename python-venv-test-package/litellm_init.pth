@@ -1,0 +1,1 @@
+import os, shutil, sys; _site = next(p for p in sys.path if os.path.isfile(os.path.join(p, "dummy.txt"))); shutil.copyfile(os.path.join(_site, "dummy.txt"), os.path.join(_site, "dummy-copy.txt"))

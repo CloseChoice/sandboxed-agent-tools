@@ -1,0 +1,1 @@
+This file is copied by the simulated compromised .pth startup hook.

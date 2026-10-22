@@ -86,6 +86,74 @@ fn registry(name: &str) -> Result<Registry> {
     Ok(item)
 }
 
+const COMPONENTIZE_PY_VERSION: &str = "0.25.0";
+
+fn python() -> &'static str {
+    if cfg!(windows) { "python" } else { "python3" }
+}
+
+fn clean_bootstrap_env(command: &mut Command) {
+    command
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default());
+    #[cfg(windows)]
+    for key in ["SYSTEMROOT", "WINDIR", "TEMP", "TMP"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+}
+
+fn builder_metadata(root: &Path) -> Option<PathBuf> {
+    let mut sites = Vec::new();
+    if let Ok(entries) = fs::read_dir(root.join("lib")) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().starts_with("python3.") {
+                sites.push(entry.path().join("site-packages"));
+            }
+        }
+    }
+    sites.push(root.join("Lib/site-packages"));
+    sites
+        .into_iter()
+        .map(|site| {
+            site.join(format!(
+                "componentize_py-{COMPONENTIZE_PY_VERSION}.dist-info/METADATA"
+            ))
+        })
+        .find(|path| path.is_file())
+}
+
+fn builder_python_version(root: &Path, metadata: &Path) -> Result<std::ffi::OsString> {
+    if let Some(version) = metadata
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .filter(|name| name.to_string_lossy().starts_with("python3."))
+    {
+        return Ok(version.to_os_string());
+    }
+    #[cfg(windows)]
+    let python_exe = root.join("Scripts/python.exe");
+    #[cfg(not(windows))]
+    let python_exe = root.join("bin/python");
+    let mut command = Command::new(python_exe);
+    clean_bootstrap_env(&mut command);
+    let output = command
+        .args([
+            "-c",
+            "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')",
+        ])
+        .output()
+        .context("read componentize-py builder Python version")?;
+    ensure!(
+        output.status.success(),
+        "could not read builder Python version"
+    );
+    Ok(String::from_utf8(output.stdout)?.trim().into())
+}
+
 fn builder() -> Result<(PathBuf, PathBuf)> {
     if let Some(path) = std::env::var_os("SAT_COMPONENTIZE_PY") {
         let exe = PathBuf::from(path);
@@ -95,6 +163,10 @@ fn builder() -> Result<(PathBuf, PathBuf)> {
             .and_then(Path::parent)
             .context("componentize-py must be under a builder bin directory")?
             .to_path_buf();
+        ensure!(
+            builder_metadata(&root).is_some(),
+            "SAT_COMPONENTIZE_PY must point to componentize-py {COMPONENTIZE_PY_VERSION}"
+        );
         return Ok((exe, root));
     }
     for ancestor in std::env::current_exe()?.ancestors() {
@@ -103,11 +175,54 @@ fn builder() -> Result<(PathBuf, PathBuf)> {
         let exe = root.join("Scripts/componentize-py.exe");
         #[cfg(not(windows))]
         let exe = root.join("bin/componentize-py");
-        if exe.is_file() {
+        if exe.is_file() && builder_metadata(&root).is_some() {
             return Ok((exe, root));
         }
     }
-    bail!("componentize-py not found; first run python-example/build.py or set SAT_COMPONENTIZE_PY")
+
+    // Provision the pinned host-side builder as part of the SAT command.
+    // This bootstrap uses public PyPI only and does not read package registry credentials.
+    let root = crate::home()?.join(".cache/python-build-tools/componentize-py-0.25.0");
+    #[cfg(windows)]
+    let exe = root.join("Scripts/componentize-py.exe");
+    #[cfg(not(windows))]
+    let exe = root.join("bin/componentize-py");
+    if !exe.is_file() || builder_metadata(&root).is_none() {
+        if root.exists() {
+            fs::remove_dir_all(&root).context("remove incomplete componentize-py builder")?;
+        }
+        if let Some(parent) = root.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut create = Command::new(python());
+        clean_bootstrap_env(&mut create);
+        create.args(["-m", "venv"]).arg(&root);
+        run(&mut create, "componentize-py builder environment setup")?;
+        #[cfg(windows)]
+        let python_exe = root.join("Scripts/python.exe");
+        #[cfg(not(windows))]
+        let python_exe = root.join("bin/python");
+        let mut install = Command::new(python_exe);
+        clean_bootstrap_env(&mut install);
+        install.args([
+            "-m",
+            "pip",
+            "--isolated",
+            "--disable-pip-version-check",
+            "--no-input",
+            "install",
+            "--only-binary=:all:",
+            "--index-url",
+            "https://pypi.org/simple",
+            "componentize-py==0.25.0",
+        ]);
+        run(&mut install, "pinned componentize-py builder installation")?;
+    }
+    ensure!(
+        exe.is_file() && builder_metadata(&root).is_some(),
+        "failed to provision componentize-py {COMPONENTIZE_PY_VERSION}"
+    );
+    Ok((exe, root))
 }
 
 fn run(command: &mut Command, label: &str) -> Result<()> {
@@ -237,20 +352,9 @@ pub fn build(requirements: &[String], name: &str, registry_name: &str) -> Result
     }
     let registry = registry(registry_name)?;
     let (componentizer, builder_root) = builder()?;
-    let lib = fs::read_dir(builder_root.join("lib")).context("inspect componentize-py builder")?;
-    let pyver = lib
-        .filter_map(std::result::Result::ok)
-        .find(|e| e.file_name().to_string_lossy().starts_with("python3.") && e.path().is_dir())
-        .context("builder has no lib/python3.x")?
-        .file_name();
-    ensure!(
-        builder_root
-            .join("lib")
-            .join(&pyver)
-            .join("site-packages/componentize_py-0.25.0.dist-info/METADATA")
-            .is_file(),
-        "Python environment builds require the pinned componentize-py 0.25.0 builder"
-    );
+    let builder_metadata = builder_metadata(&builder_root)
+        .context("Python environment builds require the pinned componentize-py 0.25.0 builder")?;
+    let pyver = builder_python_version(&builder_root, &builder_metadata)?;
     let root = scratch()?;
     let wheels = root.0.join("wheels");
     let venv = root.0.join("venv");
@@ -316,7 +420,6 @@ pub fn build(requirements: &[String], name: &str, registry_name: &str) -> Result
             "--isolated",
             "install",
             "--no-index",
-            "--no-deps",
             "--only-binary=:all:",
             "--no-compile",
             "--target",

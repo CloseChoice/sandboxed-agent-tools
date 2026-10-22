@@ -13,13 +13,27 @@ implementation accepts package specifiers only and supports universal
 extensions are rejected/not supported. Credentials stay in the host process and
 are never included in the guest environment.
 
-`componentize-py` is itself a host executable in this design. It pre-initializes
-the Python component by running the Python guest under Wasmtime. Only the staged
-application and staged package site-packages are mapped into the guest. Imports
-and Python `.pth` startup hooks execute in that guest, with no network or host
-credentials. The final component file is written by the trusted componentizer
-outside those mounted paths. The staging directory is unique, initially empty,
-configurable via `SAT_BUILD_TMP`, and removed on both success and failure.
+SAT provisions the pinned `componentize-py` 0.25.0 builder under
+`SAT_HOME/.cache/python-build-tools` on first use, so users do not need to run a
+separate build script. The bootstrap uses an isolated Python environment and
+public PyPI, without passing Python package registry credentials. The builder
+version is pinned, but its Python dependencies are not yet hash-locked and are
+resolved during bootstrap. Those packages are also part of the host trusted
+build supply chain. The componentizer is still a host executable in this
+implementation. It
+pre-initializes the Python component by running the Python guest under Wasmtime.
+Only the staged application and staged package site-packages are mapped into the
+guest. Imports and Python `.pth` startup hooks execute in that guest, with no
+network or host credentials. The final component file is written by the
+componentizer outside those mounted paths. The staging directory is unique,
+initially empty, configurable via `SAT_BUILD_TMP`, and removed on both success
+and failure.
+
+The host-side componentizer remains part of the trusted build surface: it runs
+with the SAT user's operating-system privileges, even though package startup
+code runs inside its WASI guest. A componentizer or dependency vulnerability
+could therefore compromise the host. Running the complete builder inside an
+outer WASI sandbox is a future hardening option.
 
 SAT checks the generated package with its existing component parser/runtime
 loader before registration. This validation is still a host-side Wasmtime parse
@@ -64,8 +78,7 @@ operators are trusted to serve package files referenced by their index pages.
 
 ## CLI and setup
 
-Run `python3 python-example/build.py --no-install` once to provision the pinned
-componentize-py toolchain, then configure the index and install:
+Configure the index and install; SAT provisions its builder automatically:
 
 ```sh
 sat python-venv install 'requests==2.32.3' --name python_requests

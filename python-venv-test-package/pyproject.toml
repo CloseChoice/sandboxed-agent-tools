@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sat-litellm-startup-probe"
+version = "0.1.0"
+description = "A harmless .pth startup-hook probe for SAT's WASI Python builder"
+requires-python = ">=3.8"
+
+[tool.setuptools]
+py-modules = ["litellm_startup_probe"]
+package-dir = {"" = "src"}
