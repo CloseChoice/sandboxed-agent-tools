@@ -147,9 +147,16 @@ Optional positional arguments must follow required ones. A top-level metadata fi
 parameters (without defaults); Python uses this for `-c CODE` versus `script.py`.
 Place this field before TOML sub-tables.
 Only root function exports are supported. Inputs can be string, bool, u32/u64,
-s32/s64, f32/f64, or `option<T>` of those types. Booleans use `--option true`/`false`.
+s32/s64, f32/f64, `option<T>` of those types, or `option<list<string>>`. A
+`list<string>` option accepts repeated flags and preserves their order. Booleans use `--option true`/`false`.
 Results are printed as text or JSON (`--json` forces JSON). WIT errors become
 nonzero exits.
+
+Tools use 50 million Wasmtime fuel by default. Metadata may request a larger
+budget up to the host ceiling of 1 billion; SAT rejects values outside the
+supported range and enforces the ceiling at execution. Use the optional
+top-level `fuel` field for a tool with a documented compute need; for example,
+`sat/ripgrep/tool.toml` requests the maximum for regex compilation and recursive traversal.
 
 Help is generated without executing the guest or opening its bound files.
 `pack`/`install` validate the component, metadata, defaults, policy, and import
@@ -292,6 +299,67 @@ pre-initialization is resource-limited by a process timeout, but
 SAT does not yet enforce a build memory or disk quota. It caches completed builds
 by tool name, sorted requirement strings, registry identity and downloaded wheel
 hashes; it still resolves/downloads wheels before checking that cache.
+
+## JSON queries with jaq
+
+The [`jaq`](jaq/README.md) WASIp2 component runs jq-style filters with jaq's
+standard library. It supports inline JSON, explicitly piped stdin, granted files,
+variables, raw/slurp input, and pretty/compact/raw output:
+
+```sh
+bash sat/jaq/build.sh # Builds the release host and component
+printf '%s\n' '{"items":[1,2,3]}' | sat jaq '.items | map(. * 2)' --stdin -c true
+sat jaq '.users[] | select(.active) | .name' \
+  --files /data/users.json --read ./sat/jaq/examples::/data -r true
+```
+
+Select the build script's `SAT_HOME` (default `sat/target/demo/registry`) and use
+`sat/target/release/sat` or an updated SAT on PATH. SAT boolean options use values
+such as `-r true`; see the tool README for the jq CLI mapping and limitations.
+
+Tool metadata may set `stdin = "input"` to enable the explicit host `--stdin`
+bridge for an optional string option with no default. This bridge reads at most
+8 MiB of UTF-8, passes it through WIT, and grants no guest filesystem or stdio
+authority. Tools without this metadata do not receive stdin. Setting
+`verbatim_output = true` presents returned strings without adding a newline;
+jaq uses this for exact empty/raw/joined output. Generic `--json` presentation
+still encodes the result as JSON.
+
+## Code retrieval
+
+The [`code`](code/README.md) WASIp2 component statically links Tree-sitter and
+Python, Rust, JavaScript, TypeScript, and TSX grammars. It finds text and returns
+whole enclosing functions with deduplicated hits, exact ranges, hashes, and parse
+status. It also provides outline, read-symbol, and read-enclosing operations:
+
+```sh
+bash sat/code/build.sh # Requires WASI SDK; see code/README.md
+sat code search 'TemporaryDirectory' --paths /src --read ./sat::/src
+sat code outline --paths /src/runtime.rs --read ./sat/src::/src
+sat code read-symbol execution_error --paths /src/runtime.rs --read ./sat/src::/src --format json
+```
+
+Use the build script's `SAT_HOME` (default `sat/target/demo/registry`). Source
+access is restricted by the same host-enforced `--read` grants as ripgrep.
+Structural ast-grep patterns and compiler/type resolution are not included.
+
+## Ripgrep
+
+See [`ripgrep`](ripgrep/README.md) for a WASIp2 component built on ripgrep's
+matcher, searcher, and ignore libraries. It searches granted files/directories
+and returns readable excerpts through WIT (or structured results with `--format json`):
+
+```sh
+bash sat/ripgrep/build.sh
+sat ripgrep 'fn\s+run' --paths /src --read ./sat/src::/src
+sat ripgrep 'TODO' --paths /src --read ./sat/src::/src -C 2 --max-results 20
+```
+
+Use the same `SAT_HOME` as the build script (default `sat/target/demo/registry`).
+The component supports regex/literal and case-insensitive search, recursive
+ignore filtering, and context lines. `--read` grants are enforced by the host;
+searching without filesystem authority fails. Run `python3 sat/ripgrep/test.py`
+for component integration and confinement checks.
 
 ## Pi and Brave search
 

@@ -1,0 +1,2 @@
+# No outgoing HTTP even if a future host links an HTTP implementation.
+http = []

@@ -1,0 +1,15 @@
+package sat:jaq@0.1.0;
+
+world jaq {
+    // JSON data and formatted results travel through WIT, never guest stdio.
+    export run: func(
+        filter: option<string>, input: option<string>, files: option<list<string>>,
+        from-file: option<string>, arg: option<list<string>>, argjson: option<list<string>>,
+        slurpfile: option<list<string>>, rawfile: option<list<string>>,
+        args: option<list<string>>, jsonargs: option<list<string>>,
+        null-input: bool, raw-input: bool, slurp: bool, raw-output: bool,
+        join-output: bool, raw-output0: bool, compact-output: bool,
+        sort-keys: bool, ascii-output: bool, tab: bool, indent: u32,
+        exit-status: bool,
+    ) -> result<string, string>;
+}

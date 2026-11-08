@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 use wasm_encoder::Encode;
 use wasmparser::{Encoding, Parser, Payload};
 
+pub const MAX_FUEL: u64 = 1_000_000_000;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tool {
@@ -19,6 +21,15 @@ pub struct Tool {
     pub examples: Vec<Example>,
     #[serde(default)]
     pub exactly_one_of: Vec<String>,
+    /// Requested Wasmtime fuel. The host enforces a hard maximum.
+    #[serde(default)]
+    pub fuel: Option<u64>,
+    /// Optional string parameter filled only when the caller passes --stdin.
+    #[serde(default)]
+    pub stdin: Option<String>,
+    /// Present a returned string without adding a newline (e.g. jq -j).
+    #[serde(default)]
+    pub verbatim_output: bool,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -116,6 +127,10 @@ impl Package {
             .context("missing sat.tool.v1 section; use sat pack")?;
         let policy_text = sections.remove("sat.policy.v1");
         let tool: Tool = toml::from_str(&tool_text).context("invalid tool metadata")?;
+        ensure!(
+            tool.fuel.is_none_or(|fuel| (1_000_000..=MAX_FUEL).contains(&fuel)),
+            "tool fuel must be between 1,000,000 and 1,000,000,000"
+        );
         ensure!(
             valid_name(&tool.name),
             "tool name must contain only letters, digits, hyphens and underscores"

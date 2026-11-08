@@ -2,6 +2,9 @@
 
 - [FFF fuzzy matching library](fuzzy-search/README.md): a self-contained WebAssembly fuzzy matcher. All source, dependencies, build configuration, scripts, tests, and examples are in `fuzzy-search/`.
 - [File-content search CLI](#search-file-contents-with-wasmtime): a sandboxed literal search tool in `cli/`.
+- [Ripgrep WASI tool](sat/ripgrep/README.md): recursive regex search with filesystem grants, context, and bounded text or JSON results through SAT.
+- [Tree-sitter code retrieval](sat/code/README.md): find text and return whole enclosing functions, outline declarations, or read symbols in sandboxed source files.
+- [jaq JSON processing](sat/jaq/README.md): jq-style filters, variables, JSON streams, and raw/slurp input inside WASI.
 
 ## Set up another machine
 

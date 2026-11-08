@@ -1,0 +1,76 @@
+name = "jaq"
+version = "0.1.0"
+description = "jq-style JSON queries and transformations using jaq: map/select/reduce, variables, regex, JSON streams, raw/slurp input, and formatted output."
+entrypoint = "run"
+fuel = 1000000000
+stdin = "input"
+verbatim_output = true
+
+[[arguments]]
+name = "filter"
+help = "jq filter, default '.'; use --from-file to load a filter from a granted file."
+
+[options.input]
+help = "Inline UTF-8 JSON stream or raw text. Use --stdin for piped input; cannot combine with --files."
+[options.files]
+help = "Granted guest input file; repeat to process multiple files in order."
+[options.from-file]
+short = "f"
+help = "Read the filter from this granted guest file (conflicts with positional filter)."
+[options.arg]
+help = "Bind a string variable as NAME=VALUE; repeat for multiple variables."
+[options.argjson]
+help = "Bind a JSON variable as NAME=JSON; repeat for multiple variables."
+[options.slurpfile]
+help = "Bind an array of JSON values from a granted file as NAME=GUEST_PATH; repeatable."
+[options.rawfile]
+help = "Bind file text from a granted file as NAME=GUEST_PATH; repeatable."
+[options.args]
+help = "Append a string to $ARGS.positional (repeatable)."
+[options.jsonargs]
+help = "Append a JSON value to $ARGS.positional (repeatable; conflicts with --args)."
+[options.null-input]
+short = "n"
+default = false
+help = "Run once with null instead of consuming the first input (true/false)."
+[options.raw-input]
+short = "R"
+default = false
+help = "Read text lines instead of JSON values (true/false)."
+[options.slurp]
+short = "s"
+default = false
+help = "Collect all input values into one array, or all raw text into one string (true/false)."
+[options.raw-output]
+short = "r"
+default = false
+help = "Write strings without JSON quotes (true/false)."
+[options.join-output]
+short = "j"
+default = false
+help = "Raw string output without separators or final newline (true/false)."
+[options.raw-output0]
+default = false
+help = "Raw string output separated by NUL; reject strings containing NUL (true/false)."
+[options.compact-output]
+short = "c"
+default = false
+help = "Compact JSON rather than pretty printing (true/false)."
+[options.sort-keys]
+short = "S"
+default = false
+help = "Sort object keys recursively (true/false)."
+[options.ascii-output]
+short = "a"
+default = false
+help = "Escape non-ASCII characters in JSON strings (true/false)."
+[options.tab]
+default = false
+help = "Indent with tabs (true/false)."
+[options.indent]
+default = 2
+help = "Spaces per indentation level, 0..8."
+[options.exit-status]
+short = "e"
+default = false
+help = "Fail if the last result is false/null, or no result was produced (true/false; SAT reports status 1 for all tool errors)."

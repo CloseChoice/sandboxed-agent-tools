@@ -1,0 +1,3 @@
+# Keep these rules inside the subtree so sandboxed searches granted only sat/
+# can skip build artifacts without reading the repository's parent .gitignore.
+target/

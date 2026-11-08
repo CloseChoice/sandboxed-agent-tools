@@ -1,6 +1,6 @@
 use crate::{
     files::{self, Capability},
-    metadata::{Package, Policy, valid_name},
+    metadata::{MAX_FUEL, Package, Policy, valid_name},
 };
 use anyhow::{Context, Result, bail, ensure};
 use clap::{Arg, ArgAction, ArgGroup, Command};
@@ -18,6 +18,33 @@ use wasmtime_wasi_http::{
 type IoFuture = Box<dyn Future<Output = Result<(), Error>> + Send>;
 type ResponseFuture =
     Box<dyn Future<Output = Result<(Response<WasiBody>, IoFuture), Error>> + Send>;
+
+const DEFAULT_FUEL: u64 = 50_000_000;
+const MAX_STDIN_BYTES: usize = 8 * 1024 * 1024;
+
+fn read_stdin_text(reader: impl std::io::Read) -> Result<String> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    reader
+        .take((MAX_STDIN_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)?;
+    ensure!(bytes.len() <= MAX_STDIN_BYTES, "stdin exceeds 8 MiB limit");
+    String::from_utf8(bytes).context("stdin must be UTF-8")
+}
+
+fn execution_error(error: anyhow::Error) -> anyhow::Error {
+    if matches!(
+        error.downcast_ref::<wasmtime::Trap>(),
+        Some(wasmtime::Trap::OutOfFuel)
+    ) {
+        anyhow::anyhow!(
+            "tool exhausted its compute budget; narrow the input or exclude generated files. \
+             For searches, choose a smaller --paths directory or add an .ignore file inside the granted directory"
+        )
+    } else {
+        error
+    }
+}
 
 pub struct HttpPolicy {
     pub allowed: bool,
@@ -195,6 +222,23 @@ impl Tool {
             .map(str::to_owned)
             .into();
         let mut shorts = BTreeSet::from(['h']);
+        if let Some(name) = &package.tool.stdin {
+            ensure!(
+                params.iter().any(|(n, ty)| n == name
+                    && matches!(ty,
+                Type::Option(inner) if matches!(inner.ty(), Type::String))),
+                "stdin must name an optional string WIT parameter"
+            );
+            ensure!(
+                package
+                    .tool
+                    .options
+                    .get(name)
+                    .is_some_and(|option| option.default.is_none()),
+                "stdin parameter must be an option without a default"
+            );
+            names.insert("stdin".into());
+        }
         for option in package.tool.options.values() {
             if let Some(short) = option.short {
                 ensure!(
@@ -330,6 +374,11 @@ impl Tool {
                     .action(ArgAction::SetTrue)
                     .help("Print structured output/help"),
             );
+        if let Some(name) = &self.package.tool.stdin {
+            cmd = cmd.arg(Arg::new("stdin").long("stdin").action(ArgAction::SetTrue)
+                .conflicts_with(name.clone())
+                .help("Pass UTF-8 stdin to the tool (maximum 8 MiB; does not inherit guest stdio)"));
+        }
         for name in ["read", "read-write"] {
             cmd = cmd.arg(
                 Arg::new(name)
@@ -363,6 +412,10 @@ impl Tool {
             let mut arg = Arg::new(name.clone())
                 .long(name.clone())
                 .help(spec.help.clone());
+            let ty = &self.params.iter().find(|(n, _)| n == name).unwrap().1;
+            if is_string_list(ty) {
+                arg = arg.action(ArgAction::Append).value_name("VALUE");
+            }
             if let Some(short) = spec.short {
                 arg = arg.short(short);
             }
@@ -442,15 +495,18 @@ impl Tool {
             }
             Err(e) => return Err(e.into()),
         };
-        let params = self
+        let mut params = self
             .params
             .iter()
-            .map(|(n, t)| match matches.get_one::<String>(n) {
-                Some(value) => parse_value(t, value),
-                None if matches!(t, Type::Option(_)) => Ok(Val::Option(None)),
-                None => bail!("missing parameter {n}"),
-            })
+            .map(|(n, t)| parse_matches(t, n, &matches))
             .collect::<Result<Vec<_>>>()?;
+        if let Some(name) = &self.package.tool.stdin
+            && matches.get_flag("stdin")
+        {
+            let text = read_stdin_text(std::io::stdin().lock())?;
+            let index = self.params.iter().position(|(n, _)| n == name).unwrap();
+            params[index] = Val::Option(Some(Box::new(Val::String(text))));
+        }
         let mut bindings = files::Bindings::new();
         for cap in &self.caps {
             bindings.insert(
@@ -498,7 +554,7 @@ impl Tool {
             },
         );
         store.limiter(|s| &mut s.limits);
-        store.set_fuel(50_000_000)?;
+        store.set_fuel(self.package.tool.fuel.unwrap_or(DEFAULT_FUEL).min(MAX_FUEL))?;
         let result = tokio::time::timeout(Duration::from_secs(30), async {
             let instance = self
                 .linker
@@ -517,11 +573,16 @@ impl Tool {
             })
         })
         .await
-        .context("tool exceeded 30 seconds")??;
+        .context("tool exceeded 30 seconds")?
+        .map_err(execution_error)?;
         if !matches.get_flag("json")
             && let Json::String(text) = &result
         {
-            println!("{text}");
+            if self.package.tool.verbatim_output {
+                print!("{text}");
+            } else {
+                println!("{text}");
+            }
         } else {
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
@@ -531,7 +592,8 @@ impl Tool {
 
 fn supported(t: &Type) -> bool {
     if let Type::Option(inner) = t {
-        return !matches!(inner.ty(), Type::Option(_)) && supported(&inner.ty());
+        let inner = inner.ty();
+        return !matches!(inner, Type::Option(_)) && (is_string_list(&inner) || supported(&inner));
     }
     matches!(
         t,
@@ -544,6 +606,30 @@ fn supported(t: &Type) -> bool {
             | Type::Float32
             | Type::Float64
     )
+}
+fn is_string_list(t: &Type) -> bool {
+    match t {
+        Type::List(list) => matches!(list.ty(), Type::String),
+        Type::Option(inner) => is_string_list(&inner.ty()),
+        _ => false,
+    }
+}
+fn parse_matches(ty: &Type, name: &str, matches: &clap::ArgMatches) -> Result<Val> {
+    if is_string_list(ty) {
+        let values = matches
+            .get_many::<String>(name)
+            .map(|values| values.cloned().map(Val::String).collect::<Vec<_>>());
+        return Ok(if matches!(ty, Type::Option(_)) {
+            Val::Option(values.map(|items| Box::new(Val::List(items))))
+        } else {
+            Val::List(values.unwrap_or_default())
+        });
+    }
+    match matches.get_one::<String>(name) {
+        Some(value) => parse_value(ty, value),
+        None if matches!(ty, Type::Option(_)) => Ok(Val::Option(None)),
+        None => bail!("missing parameter {name}"),
+    }
 }
 fn default_text(v: &toml::Value) -> Result<String> {
     Ok(match v {
@@ -606,6 +692,40 @@ fn to_json(v: &Val) -> Result<Json> {
 mod tests {
     use super::*;
     use crate::metadata::HttpRule;
+
+    #[test]
+    fn stdin_text_is_bounded_and_utf8() {
+        use std::io::Read as _;
+        assert_eq!(read_stdin_text("日本語".as_bytes()).unwrap(), "日本語");
+        assert!(
+            read_stdin_text(&b"\xff"[..])
+                .unwrap_err()
+                .to_string()
+                .contains("UTF-8")
+        );
+        let too_large = std::io::repeat(b'x').take((MAX_STDIN_BYTES + 1) as u64);
+        assert!(
+            read_stdin_text(too_large)
+                .unwrap_err()
+                .to_string()
+                .contains("8 MiB")
+        );
+    }
+
+    #[test]
+    fn fuel_exhaustion_has_actionable_error_without_wasm_backtrace() {
+        let trap = anyhow::Error::new(wasmtime::Trap::OutOfFuel)
+            .context("error while executing at wasm backtrace");
+        let message = format!("{:#}", execution_error(trap));
+        assert!(message.contains("tool exhausted its compute budget"));
+        assert!(message.contains(".ignore"));
+        assert!(!message.contains("wasm backtrace"));
+        let other = anyhow::anyhow!("original failure").context("original context");
+        assert_eq!(
+            format!("{:#}", execution_error(other)),
+            "original context: original failure"
+        );
+    }
 
     #[test]
     fn http_grant_and_package_ceiling_are_both_required() {
@@ -736,7 +856,7 @@ mod tests {
             },
         );
         store.limiter(|s| &mut s.limits);
-        store.set_fuel(50_000_000).unwrap();
+        store.set_fuel(DEFAULT_FUEL).unwrap();
         let instance = tool
             .linker
             .instantiate_async(&mut store, &tool.component)
