@@ -16,6 +16,7 @@ impl Guest for Code {
         max_results: u32,
         max_bytes: u32,
         format: String,
+        extract: String,
     ) -> Result<String, String> {
         retrieval::run(retrieval::Request {
             operation,
@@ -29,6 +30,7 @@ impl Guest for Code {
             max_results: max_results as usize,
             max_bytes: max_bytes as usize,
             format,
+            extract,
         })
     }
 }

@@ -337,11 +337,15 @@ bash sat/code/build.sh # Requires WASI SDK; see code/README.md
 sat code search 'TemporaryDirectory' --paths /src --read ./sat::/src
 sat code outline --paths /src/runtime.rs --read ./sat/src::/src
 sat code read-symbol execution_error --paths /src/runtime.rs --read ./sat/src::/src --format json
+sat code read-symbol execution_error --paths /src/runtime.rs --read ./sat/src::/src --extract signature
 ```
 
 Use the build script's `SAT_HOME` (default `sat/target/demo/registry`). Source
 access is restricted by the same host-enforced `--read` grants as ripgrep.
 Structural ast-grep patterns and compiler/type resolution are not included.
+Use `--extract signature-docs` for a header with attached documentation and a
+leading Python docstring. Both signature modes omit implementation bodies and
+provide an exact `source_range` alongside the full definition's ranges.
 
 ## Ripgrep
 

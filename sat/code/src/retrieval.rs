@@ -29,6 +29,7 @@ pub struct Request {
     pub max_results: usize,
     pub max_bytes: usize,
     pub format: String,
+    pub extract: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -81,6 +82,10 @@ struct Definition {
     kind: String,
     range: SourceRange,
     definition_range: SourceRange,
+    // `range` still identifies the whole selected declaration; source_range
+    // identifies the exact slice returned by the requested extraction.
+    source_range: Option<SourceRange>,
+    extraction: &'static str,
     source: Option<String>,
     signature: String,
     parent_signature: Option<String>,
@@ -200,7 +205,7 @@ fn owner(node: Node<'_>) -> bool {
     )
 }
 
-fn signature(node: Node<'_>, source: &str) -> String {
+fn signature_end(node: Node<'_>, source: &str) -> usize {
     let mut end = node.child_by_field_name("body").map_or_else(
         || {
             source[node.byte_range()]
@@ -217,9 +222,17 @@ fn signature(node: Node<'_>, source: &str) -> String {
             end = colon.end_byte();
         }
     }
+    // Exclude whitespace between the signature and body, without rewriting
+    // multiline signatures or losing their original source coordinates.
+    node.start_byte() + source[node.start_byte()..end].trim_end().len()
+}
+
+fn signature(node: Node<'_>, source: &str) -> String {
+    let end = signature_end(node, source);
     // Signatures themselves can be adversarially large. Mark clipping instead
     // of silently claiming to have returned the entire signature.
-    let text = source[node.start_byte()..end].trim();
+    let start = source_node(node, false).start_byte();
+    let text = source[start..end].trim();
     if text.len() <= 4096 {
         text.into()
     } else {
@@ -228,6 +241,61 @@ fn signature(node: Node<'_>, source: &str) -> String {
             text.chars().take(1024).collect::<String>()
         )
     }
+}
+
+// A Python docstring is the first executable statement, containing a string
+// literal. Comments may precede it, but bytes/f-strings and later strings are
+// not docstrings. Preserve the literal exactly; do not evaluate escapes.
+fn python_docstring<'tree>(node: Node<'tree>, source: &str) -> Option<Node<'tree>> {
+    if !matches!(node.kind(), "function_definition" | "class_definition") {
+        return None;
+    }
+    let body = node.child_by_field_name("body")?;
+    let mut cursor = body.walk();
+    let statement = body
+        .named_children(&mut cursor)
+        .find(|child| child.kind() != "comment")?;
+    if statement.kind() != "expression_statement" || statement.named_child_count() != 1 {
+        return None;
+    }
+    fn literal(node: Node<'_>, source: &str) -> bool {
+        match node.kind() {
+            "parenthesized_expression" => {
+                node.named_child_count() == 1
+                    && node
+                        .named_child(0)
+                        .is_some_and(|child| literal(child, source))
+            }
+            "concatenated_string" => {
+                let mut cursor = node.walk();
+                node.named_child_count() > 0
+                    && node
+                        .named_children(&mut cursor)
+                        .all(|child| literal(child, source))
+            }
+            "string" => {
+                let prefix = source[node.byte_range()]
+                    .split(['\'', '"'])
+                    .next()
+                    .unwrap_or("");
+                prefix.chars().all(|ch| matches!(ch, 'r' | 'R' | 'u' | 'U'))
+            }
+            _ => false,
+        }
+    }
+    literal(statement.named_child(0)?, source).then_some(statement)
+}
+
+fn signature_source_range(node: Node<'_>, source: &str, docs: bool) -> (usize, usize) {
+    let wrapper = source_node(node, docs);
+    let start = attached_start(wrapper, source, docs);
+    let end = if docs {
+        python_docstring(node, source)
+            .map_or_else(|| signature_end(node, source), |doc| doc.end_byte())
+    } else {
+        signature_end(node, source)
+    };
+    (start, end)
 }
 
 fn symbol(node: Node<'_>, source: &str) -> String {
@@ -369,6 +437,12 @@ fn validate(request: &Request) -> Result<(), String> {
         || !matches!(request.format.as_str(), "text" | "json")
     {
         return Err("invalid mode, context, or format (see --help)".into());
+    }
+    if !matches!(
+        request.extract.as_str(),
+        "full" | "signature" | "signature-docs"
+    ) {
+        return Err("extract must be full, signature, or signature-docs".into());
     }
     if request.paths.is_empty()
         || request.paths.len() > 128
@@ -594,9 +668,25 @@ pub fn run(request: Request) -> Result<String, String> {
             let wrapper = source_node(node, request.include_docs);
             let start = attached_start(wrapper, source, request.include_docs);
             let end = wrapper.end_byte();
-            let oversized = end - start > request.max_bytes;
-            let outline = request.operation == "outline";
-            let content = (!outline && !oversized).then(|| source[start..end].to_owned());
+            let outline = request.operation == "outline" && request.extract == "full";
+            let extraction = match request.extract.as_str() {
+                _ if outline => "outline",
+                "signature" => "signature",
+                "signature-docs" => "signature-docs",
+                _ => "full",
+            };
+            let (source_start, source_end) = if extraction == "full" || outline {
+                (start, end)
+            } else {
+                signature_source_range(
+                    node,
+                    source,
+                    extraction == "signature-docs" && request.include_docs,
+                )
+            };
+            let oversized = source_end - source_start > request.max_bytes;
+            let content =
+                (!outline && !oversized).then(|| source[source_start..source_end].to_owned());
             let result = Definition {
                 path: path_text.clone(),
                 language: language_name.into(),
@@ -604,6 +694,10 @@ pub fn run(request: Request) -> Result<String, String> {
                 kind: node.kind().into(),
                 range: coordinates.range(start, end),
                 definition_range: coordinates.range(node.start_byte(), node.end_byte()),
+                source_range: content
+                    .as_ref()
+                    .map(|_| coordinates.range(source_start, source_end)),
+                extraction,
                 source: content,
                 signature: signature(node, source),
                 parent_signature: request
@@ -613,13 +707,15 @@ pub fn run(request: Request) -> Result<String, String> {
                 hits,
                 file_hash: hash.clone(),
                 parse_errors: tree.root_node().has_error(),
-                complete: !outline && !oversized && !node.has_error(),
+                complete: extraction == "full" && !oversized && !node.has_error(),
                 status: if outline {
                     "outline"
                 } else if oversized {
                     "size-limit"
                 } else if node.has_error() {
                     "parse-error"
+                } else if extraction != "full" {
+                    extraction
                 } else {
                     "ok"
                 },
@@ -695,5 +791,104 @@ mod tests {
         assert_eq!(range.end_byte - range.start_byte, 5);
         let eof = Coordinates::new(source).range(source.len(), source.len());
         assert_eq!((eof.end_line, eof.end_column_byte), (3, 0));
+    }
+
+    #[test]
+    fn python_signature_docs_keep_multiline_header_and_docstring_only() {
+        let source = "@cached\nasync def refresh(\n    name: str = '日本語',\n) -> str:\n    # Leading body comment.\n    \"\"\"Summary.\n\n    Details.\n    \"\"\"\n    return 'BODY_MARKER'\n";
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+        let tree = parser.parse(source, None).unwrap();
+        assert!(!tree.root_node().has_error());
+        let node = declarations(tree.root_node())[0];
+        let (start, end) = signature_source_range(node, source, false);
+        assert_eq!(
+            &source[start..end],
+            "async def refresh(\n    name: str = '日本語',\n) -> str:"
+        );
+        let (start, end) = signature_source_range(node, source, true);
+        let text = &source[start..end];
+        assert!(text.starts_with("@cached\nasync def"));
+        assert!(text.contains("Leading body comment.") && text.contains("Details."));
+        assert!(text.ends_with("\"\"\""));
+        assert!(!text.contains("BODY_MARKER"));
+    }
+
+    #[test]
+    fn python_docstring_requires_a_leading_non_interpolated_text_literal() {
+        let cases = [
+            ("\"\"\"Documentation.\"\"\"", true),
+            ("r'raw documentation'", true),
+            ("u'unicode documentation'", true),
+            ("('joined ' 'documentation')", true),
+            ("b'bytes are not documentation'", false),
+            ("f'interpolation is not documentation'", false),
+            ("rb'raw bytes are not documentation'", false),
+            ("'computed ' + 'expression'", false),
+            ("x = 'assigned string'", false),
+            ("pass\n    'late string'", false),
+        ];
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+        for (statement, expected) in cases {
+            let source = format!("def f():\n    {statement}\n    return 'BODY_MARKER'\n");
+            let tree = parser.parse(&source, None).unwrap();
+            assert!(!tree.root_node().has_error(), "{statement}");
+            let node = declarations(tree.root_node())[0];
+            assert_eq!(
+                python_docstring(node, &source).is_some(),
+                expected,
+                "{statement}"
+            );
+            let (start, end) = signature_source_range(node, &source, true);
+            assert!(!source[start..end].contains("BODY_MARKER"));
+        }
+    }
+
+    #[test]
+    fn signatures_preserve_bindings_and_omit_bodies_in_all_grammars() {
+        let cases: [(&str, Language); 5] = [
+            (
+                "/// Documentation.\n#[inline]\nfn f() -> &'static str { \"BODY_MARKER\" }",
+                tree_sitter_rust::LANGUAGE.into(),
+            ),
+            (
+                "/** Documentation. */\nexport const f = async (x) => 'BODY_MARKER';",
+                tree_sitter_javascript::LANGUAGE.into(),
+            ),
+            (
+                "/** Documentation. */\nexport const f = (x: number): string => 'BODY_MARKER';",
+                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            ),
+            (
+                "/** Documentation. */\nexport const f = () => <span>BODY_MARKER</span>;",
+                tree_sitter_typescript::LANGUAGE_TSX.into(),
+            ),
+            (
+                "class C:\n    \"\"\"Documentation.\"\"\"\n    def f(self): return 'BODY_MARKER'\n",
+                tree_sitter_python::LANGUAGE.into(),
+            ),
+        ];
+        for (source, language) in cases {
+            let mut parser = Parser::new();
+            parser.set_language(&language).unwrap();
+            let tree = parser.parse(source, None).unwrap();
+            assert!(!tree.root_node().has_error(), "{source}");
+            let node = declarations(tree.root_node())[0];
+            for docs in [false, true] {
+                let (start, end) = signature_source_range(node, source, docs);
+                let text = &source[start..end];
+                assert!(!text.contains("BODY_MARKER"), "{text}");
+                assert_eq!(text.contains("Documentation."), docs, "{text}");
+                if node.kind() == "arrow_function" {
+                    assert!(text.contains("export const f ="), "{text}");
+                    assert!(signature(node, source).contains("export const f ="));
+                }
+            }
+        }
     }
 }

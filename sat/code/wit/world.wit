@@ -1,4 +1,4 @@
-package sat:code@0.1.0;
+package sat:code@0.2.0;
 
 world code {
     // Standard WASI filesystem imports come from Rust's wasip2 target.
@@ -15,5 +15,6 @@ world code {
         max-results: u32,
         max-bytes: u32,
         format: string,
+        extract: string,
     ) -> result<string, string>;
 }

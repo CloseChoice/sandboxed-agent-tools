@@ -92,6 +92,7 @@ const refresh = (client: Client): string => client.refresh();
 
         assert "code" in invoke("search", "Tree-sitter").stdout
         assert "--position" in invoke("code", "--help").stdout
+        assert "--extract" in invoke("code", "--help").stdout
         wit = invoke("inspect", "code", "--wit").stdout
         assert "wasi:filesystem" in wit and "export run:" in wit
         assert "wasi:sockets" not in wit and "wasi:http" not in wit
@@ -150,6 +151,45 @@ const refresh = (client: Client): string => client.refresh();
         assert limited["truncated"] and len(limited["results"]) == 1, limited
         readable = code("search", "nested_hit", paths=("/src/auth.py",), format="text")
         assert "inner [function_definition]" in readable and 'return "nested_hit"' in readable
+
+        # Extractions retain definition identity/hits, but return an exact,
+        # smaller source range and never claim to be the complete definition.
+        signature = code("search", "refresh_token", "--extract=signature", paths=("/src/auth.py",))["results"][0]
+        docs = code("read-symbol", "refresh", "--extract=signature-docs", paths=("/src/auth.py",))["results"][0]
+        assert signature["source"] == "async def refresh(self):", signature
+        assert signature["signature"] == signature["source"]
+        assert signature["hits"] == definition["hits"]
+        assert signature["range"] == definition["range"] and signature["file_hash"] == definition["file_hash"]
+        assert signature["extraction"] == signature["status"] == "signature" and not signature["complete"]
+        assert docs["extraction"] == docs["status"] == "signature-docs" and not docs["complete"]
+        assert '# Refresh credentials.' in docs["source"] and '@cached' in docs["source"]
+        assert '"""Renew a token."""' in docs["source"] and "return token" not in docs["source"]
+        for result in (signature, docs):
+            span = result["source_range"]
+            assert result["source"].encode() == data[span["start_byte"]:span["end_byte"]], result
+        assert definition["source_range"] == definition["range"] and definition["extraction"] == "full"
+        assert docs["source_range"]["end_line"] == 6
+        bare_docs = code("read-symbol", "refresh", "--extract=signature-docs", "--include-docs=false", paths=("/src/auth.py",))["results"][0]
+        assert bare_docs["source"] == signature["source"], bare_docs
+        assert code("read-enclosing", None, f"--position={offset}", "--extract=signature", paths=("/src/auth.py",))["results"][0]["source"] == signature["source"]
+        assert all(r["source"] is not None and r["extraction"] == "signature" for r in code("outline", None, "--extract=signature", paths=("/src/auth.py",))["results"])
+        assert 'Renew a token.' in code("outline", None, "--extract=signature-docs", paths=("/src/auth.py",), format="text")
+        # A short signature fits even when its full function does not.
+        short = code("read-symbol", "refresh", "--extract=signature", "--max-bytes=32", paths=("/src/auth.py",))["results"][0]
+        assert short["source"] == signature["source"] and short["status"] == "signature"
+        oversize = code("read-symbol", "refresh", "--extract=signature-docs", "--max-bytes=32", paths=("/src/auth.py",))["results"][0]
+        assert oversize["status"] == "size-limit" and oversize["source"] is None and oversize["source_range"] is None
+        for name in ("auth.rs", "auth.js", "auth.ts", "auth.tsx"):
+            results = code("search", "refresh_token", "--extract=signature", paths=(f"/src/{name}",))["results"]
+            assert results and all("refresh_token" not in r["source"] for r in results), results
+        js_signature = code("read-symbol", "refresh", "--extract=signature", paths=("/src/auth.js",))["results"][1]
+        assert js_signature["source"] == "export const refresh = async (client) =>", js_signature
+        rust_docs = code("read-symbol", "refresh", "--extract=signature-docs", paths=("/src/auth.rs",))["results"][0]
+        assert "/// Refresh documentation." in rust_docs["source"] and "#[inline]" in rust_docs["source"]
+        assert "refresh_token" not in rust_docs["source"]
+        code("read-symbol", "refresh", "--extract=unknown", paths=("/src/auth.py",), ok=False)
+        for extraction in ("signature", "signature-docs"):
+            code("search", "refresh_token", f"--extract={extraction}", grant=False, ok=False)
 
         # Content hashes reflect the exact bytes parsed, including non-ASCII.
         (inputs / "auth.py").write_text(fixtures["auth.py"] + "# modified\n", encoding="utf-8")

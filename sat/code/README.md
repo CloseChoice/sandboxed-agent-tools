@@ -41,6 +41,12 @@ sat/target/debug/sat code outline --paths /src/runtime.rs --read ./sat/src::/src
 sat/target/debug/sat code read-symbol 'execution_error' \
   --paths /src/runtime.rs --read ./sat/src::/src
 
+# Request a smaller extraction instead of the entire function.
+sat/target/debug/sat code read-symbol refresh --extract signature \
+  --paths /src/auth.py --read ./sat/code/examples::/src
+sat/target/debug/sat code read-symbol refresh --extract signature-docs \
+  --paths /src/auth.py --read ./sat/code/examples::/src
+
 # Read the smallest enclosing function at a zero-based UTF-8 byte position.
 sat/target/debug/sat code read-enclosing --position 50 \
   --paths /src/auth.py --read ./sat/code/examples::/src
@@ -84,6 +90,39 @@ declarator). The nearest owning class/impl signature is returned separately;
 `--include-parent-signature false` omits it. These are explicit selection rules,
 not a complete implementation of every language's documentation conventions.
 
+## Extraction modes
+
+`--extract` controls how much source is returned, independently of how the
+declaration was selected. It works with search, read-symbol, read-enclosing,
+and outline:
+
+| Mode | Returned source |
+| --- | --- |
+| `full` (default) | Entire selected definition. Outline keeps its existing signatures-only listing with `source: null`. |
+| `signature` | Exact declaration header, without attached documentation or implementation body. Multiline parameters, return annotations, binding names, and exports are preserved. |
+| `signature-docs` | Header plus adjacent comments, decorators/attributes, and the leading Python docstring, if present. Implementation statements and nested definitions are omitted. |
+
+For Python, a docstring must be the first executable statement and contain a
+text literal. Raw/unicode literals, adjacent concatenated literals, and
+parenthesized literals are supported. Bytes, f-strings, computed expressions,
+assigned strings, and strings appearing after another statement are not treated
+as docstrings. Literal spelling, escapes, whitespace, and Unicode are preserved;
+no Python code is executed. Classes can return their leading docstring too.
+
+For Rust and JavaScript/TypeScript/TSX, documentation comes from attached
+comments; string expressions inside function bodies are not interpreted as
+docstrings. If documentation is absent, `signature-docs` returns the header and
+any attached attributes/decorators. `--include-docs false` suppresses those
+prefixes and Python docstrings; `signature` always omits them.
+
+Signatures end before the syntax node's body, so a Python trailing `:` or
+JavaScript arrow `=>` remains, while braces and expression bodies are omitted.
+Signature excerpts are intentional omissions: `complete` stays false and
+`status` is `signature` or `signature-docs`, rather than a size-limit failure.
+The full definition's ranges, original search hits, and file hash remain
+available for later expansion. Excerpts can retrieve a small header from a
+large function because `--max-bytes` applies to the requested source extraction.
+
 Default output is readable source with a path, line range, symbol, and optional
 owner signature. Add `--format json` for structured metadata:
 
@@ -95,9 +134,11 @@ sat/target/debug/sat code search 'TemporaryDirectory' \
 Each definition includes:
 
 - `path`, `language`, `symbol`, Tree-sitter node `kind`, and `signature`;
-- `source`: the exact original UTF-8 slice (or `null` for outline/size limits);
-- `range`: the returned source extent, including attached prefixes;
+- `source`: the exact original UTF-8 slice selected by the extraction (or `null` for default outline/size limits);
+- `range`: the full selected definition's extent, including attached prefixes;
 - `definition_range`: the underlying syntax node, without attached prefixes;
+- `source_range`: the precise extent of `source`, or `null` when no source is returned; it equals `range` for full extraction;
+- `extraction`: `full`, `signature`, `signature-docs`, or default `outline`;
 - `hits`: original search ranges (or the supplied zero-width byte position);
 - `file_hash`: `sha256:` plus the hash of the exact file bytes parsed;
 - `parent_signature`, file-wide `parse_errors`, selected-node `complete`, and `status`.
@@ -107,12 +148,15 @@ columns start at **0** and count **UTF-8 bytes**, including at the exclusive end
 point. The hash is metadata for a future stale-edit check; SAT does not yet
 provide an edit API. Parse errors are reported even when recovery finds no
 declaration. A definition can be complete while another part of its file has
-parse errors. Outline results have `source: null`, `complete: false`, and
-`status: outline` because they intentionally omit source bodies.
+parse errors. Default outline results have `source: null`, `complete: false`,
+and `status: outline` because they intentionally omit source bodies. Explicit
+signature extractions also have `complete: false`; their mode-specific status
+distinguishes intentional excerpts from truncation. Use `source_range` to slice
+the exact returned excerpt; `range` continues to identify the full declaration.
 
-Large functions return their ranges and signature with `source: null`,
+Oversized extractions return their ranges and signature with `source: null`,
 `complete: false`, and `status: size-limit`; no silent partial body is returned.
-Use `--max-bytes` to adjust the per-definition limit (default 64 KiB, max 1 MiB).
+Use `--max-bytes` to adjust the per-extraction limit (default 64 KiB, max 1 MiB).
 Signatures exceeding 4 KiB are explicitly marked as truncated.
 
 Limits are 4 MiB per UTF-8 source file, 128 parsed files, 128 input roots,
@@ -146,7 +190,7 @@ python3 sat/code/test.py
 ```
 
 The integration test uses a private registry and real WASIp2 components. It
-checks all grammars, original source ranges, Unicode byte positions, nesting,
+checks all grammars, full/signature/signature-docs extraction, original source ranges, Unicode byte positions, nesting,
 deduplication, decorators/attributes, hashes, parse errors, limits, traversal,
 escaping symlinks, and single-file isolation. No native parser or provider is
 needed at execution time.

@@ -1,5 +1,5 @@
 name = "code"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tree-sitter code retrieval: search text and return enclosing functions, outline declarations, read symbols or enclosing definitions. Python, Rust, JavaScript, TypeScript/TSX."
 entrypoint = "run"
 fuel = 1000000000
@@ -28,7 +28,11 @@ help = "Zero-based UTF-8 byte offset for read-enclosing; requires exactly one fi
 
 [options.include-docs]
 default = true
-help = "Include adjacent documentation comments, decorators, and attributes (true/false)."
+help = "Include attached documentation in full/signature-docs extraction (true/false). Signature-only always omits docs."
+
+[options.extract]
+default = "full"
+help = "Extraction: full source, signature, or signature-docs (signature plus attached docs and Python docstring). Outline defaults to signatures without source."
 
 [options.include-parent-signature]
 default = true
@@ -40,7 +44,7 @@ help = "Maximum definitions returned (1..1000). Small values provide previews."
 
 [options.max-bytes]
 default = 65536
-help = "Maximum bytes per definition (1..1048576). Oversized definitions return a size-limit status without partial source."
+help = "Maximum bytes of extracted source per result (1..1048576). Oversized extractions return a size-limit status without partial source."
 
 [options.format]
 default = "text"
