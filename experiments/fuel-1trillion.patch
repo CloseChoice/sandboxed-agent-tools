@@ -1,0 +1,77 @@
+--- a/python-example/tool.toml
++++ b/python-example/tool.toml
+@@ -3,7 +3,7 @@
+ description = "Run Python code inside a WASI sandbox."
+ entrypoint = "run"
+ exactly_one_of = ["code", "script"]
+-fuel = 1_000_000_000
++fuel = 1_000_000_000_000
+ 
+ [[arguments]]
+ name = "script"
+--- a/sat/src/metadata.rs
++++ b/sat/src/metadata.rs
+@@ -4,7 +4,7 @@
+ use wasm_encoder::Encode;
+ use wasmparser::{Encoding, Parser, Payload};
+ 
+-pub const MAX_FUEL: u64 = 1_000_000_000;
++pub const MAX_FUEL: u64 = 1_000_000_000_000;
+ 
+ #[derive(Debug, Clone, Deserialize, Serialize)]
+ #[serde(deny_unknown_fields)]
+@@ -133,7 +133,7 @@
+         ensure!(
+             tool.fuel
+                 .is_none_or(|fuel| (1_000_000..=MAX_FUEL).contains(&fuel)),
+-            "tool fuel must be between 1,000,000 and 1,000,000,000"
++            "tool fuel must be between 1,000,000 and {MAX_FUEL}"
+         );
+         ensure!(
+             valid_name(&tool.name),
+@@ -233,6 +233,21 @@
+     const TOOL: &str = "name='sample'\nversion='1'\ndescription='demo'\nentrypoint='run'\n";
+ 
+     #[test]
++    fn fuel_budget_accepts_the_host_ceiling_and_rejects_values_outside_it() {
++        for (fuel, accepted) in [
++            (999_999_u64, false),
++            (1_000_000, true),
++            (1_000_000_000, true),
++            (1_000_000_000_000, true),
++            (1_000_000_000_001, false),
++        ] {
++            let tool = format!("{TOOL}fuel={fuel}\n");
++            let result = embed(wasm_encoder::Component::new().finish(), &tool, None);
++            assert_eq!(result.is_ok(), accepted, "fuel={fuel}");
++        }
++    }
++
++    #[test]
+     fn missing_policy_is_unrestricted_but_invalid_or_duplicate_is_rejected() {
+         let bytes = embed(wasm_encoder::Component::new().finish(), TOOL, None).unwrap();
+         assert!(Package::read(&bytes).unwrap().policy.http.is_none());
+--- a/sat/README.md
++++ b/sat/README.md
+@@ -153,10 +153,10 @@
+ nonzero exits.
+ 
+ Tools use 50 million Wasmtime fuel by default. Metadata may request a larger
+-budget up to the host ceiling of 1 billion; SAT rejects values outside the
++budget up to the host ceiling of 1 trillion; SAT rejects values outside the
+ supported range and enforces the ceiling at execution. Use the optional
+ top-level `fuel` field for a tool with a documented compute need; for example,
+-`sat/pdf-tools/tool.toml` requests the maximum for image decoding and PDF work.
++`sat/pdf-tools/tool.toml` requests one billion for image decoding and PDF work.
+ 
+ Help is generated without executing the guest or opening its bound files.
+ `pack`/`install` validate the component, metadata, defaults, policy, and import
+@@ -215,7 +215,7 @@
+ The host inherits no environment or guest stdio, grants no raw sockets, and exposes standard
+ WASI filesystem paths only through explicit grants, and uses WASI's normal clock/random services. The MVP
+ uses a 64 MiB guest memory limit, 50 million default fuel (package metadata may
+-request up to a host-enforced 1 billion), and a 30-second async execution timeout;
++request up to a host-enforced 1 trillion), and a 30-second async execution timeout;
+ these are not comprehensive limits on host I/O buffering. Pipelines and external
+ WIT comparison are not implemented. File capabilities support text and binary
+ single-file writes; binary directory writes are not implemented.

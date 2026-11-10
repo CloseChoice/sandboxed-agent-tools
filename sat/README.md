@@ -1,4 +1,4 @@
-# SAT MVP
+# SAT: Sandboxed Agent Tools
 
 A local component runner with embedded metadata, generated CLI/help, and enforced
 HTTP and file/folder restrictions. No external Wasmtime CLI is needed to run tools.
@@ -113,8 +113,9 @@ HTTP still needs `--allow-http`, and files/folders still need explicit bindings.
 Replacement requires `sat install tool.wasm --replace`. Every invocation, help,
 and inspection verifies that digest before loading the component.
 
-Compiled code is cached under `SAT_HOME/.cache`; source package hashes are still
-verified on every invocation. The registry and compilation cache are trusted local state. This is not publisher authentication: anyone
+Guest code uses Cranelift speed optimization. Initial compilation can take longer;
+compiled code is cached under `SAT_HOME/.cache` for reuse. Source package hashes
+are still verified on every invocation. The registry and compilation cache are trusted local state. This is not publisher authentication: anyone
 able to modify both its registration record and binary can replace the package.
 Remote catalogs and signatures are not implemented.
 
@@ -152,11 +153,13 @@ s32/s64, f32/f64, `option<T>` of those types, or `option<list<string>>`. A
 Results are printed as text or JSON (`--json` forces JSON). WIT errors become
 nonzero exits.
 
-Tools use 50 million Wasmtime fuel by default. Metadata may request a larger
-budget up to the host ceiling of 1 billion; SAT rejects values outside the
-supported range and enforces the ceiling at execution. Use the optional
-top-level `fuel` field for a tool with a documented compute need; for example,
-`sat/ripgrep/tool.toml` requests the maximum for regex compilation and recursive traversal.
+Tools have a host-enforced 30-second wall-clock execution deadline. Wasmtime epoch
+interruption yields guest execution every 10 ms using a separate host clock thread,
+so CPU-bound code that never calls the host can still be cancelled. Pending async
+host calls are covered by the same deadline. Fuel counting is disabled; legacy
+`fuel` package metadata remains accepted for compatibility but has no effect.
+Deadlines are time-based rather than deterministic instruction budgets. Compilation
+and argument preparation are outside the execution deadline.
 
 Help is generated without executing the guest or opening its bound files.
 `pack`/`install` validate the component, metadata, defaults, policy, and import
@@ -182,8 +185,9 @@ world example {
 
 A directory interface has `%list(path)` and `read(path)` and/or
 `write(path, contents)`. A file interface has `read()` and/or `write(contents)`.
-All paths/content are strings; writes return `result<_, string>`, reads return
-`result<string, string>`. `%list` escapes the WIT keyword; the function name is
+Text paths/content are strings; writes return `result<_, string>`, reads return
+`result<string, string>`. A single-file interface may also use
+`write(contents: list<u8>)` for binary output. `%list` escapes the WIT keyword; the function name is
 `list`. Bindings are text-only for this MVP. Directory paths are confined by
 `cap-std`, including traversal and escaping symlinks. Writes replace file contents;
 there are no delete/rename operations yet.
@@ -213,9 +217,11 @@ there is no public-internet-only mode yet.
 
 The host inherits no environment or guest stdio, grants no raw sockets, and exposes standard
 WASI filesystem paths only through explicit grants, and uses WASI's normal clock/random services. The MVP
-uses a 64 MiB guest memory limit, fuel, and a 30-second async execution timeout;
-these are not comprehensive limits on host I/O buffering. Pipelines, binary file
-resources and external WIT comparison are not implemented.
+uses a 64 MiB guest memory limit and a 30-second execution deadline enforced
+with epoch interruption and async cancellation;
+these are not comprehensive limits on host I/O buffering. Pipelines and external
+WIT comparison are not implemented. File capabilities support text and binary
+single-file writes; binary directory writes are not implemented.
 The earlier broader permission sketch is retained in `src/permissions.rs` but is
 not wired into this runner.
 
@@ -365,6 +371,27 @@ ignore filtering, and context lines. `--read` grants are enforced by the host;
 searching without filesystem authority fails. Run `python3 sat/ripgrep/test.py`
 for component integration and confinement checks.
 
+## PDF tools
+
+See [`pdf-tools`](pdf-tools/README.md) for the `pdftools` WASI component. It
+converts a PNG/JPEG file or directory into a PDF and merges PDFs from a granted
+directory. Build and install it with:
+
+```sh
+bash sat/pdf-tools/build.sh
+```
+
+Example, with read-only input and an exact-file destination grant:
+
+```sh
+mkdir -p sat/target/pdf-output
+sat pdftools --convert ./data \
+  --destination ./sat/target/pdf-output/converted.pdf --read ./data
+```
+
+The host gives the component write access to the exact destination file. It
+does not grant the component access to the output folder or to read the output.
+
 ## Pi and Brave search
 
 See [pi-extension](../pi-extension/README.md) for the local `web_search` extension
@@ -373,3 +400,37 @@ entries keyed by tool name. Each specifies an environment variable, header, and
 exact HTTPS method/origin/path scope. Secrets are injected only after both the
 embedded HTTP policy and the host credential scope authorize the request.
 This configuration is never supplied by component metadata or inherited by guests.
+
+## uutils coreutils
+
+[Build the uutils component](uutils/README.md) for sandboxed `head`, `tail`, `cat`,
+`wc`, `cut`, `sort`, `uniq`, `nl`, `ls`, `basename`, and `dirname`:
+
+```sh
+./sat/uutils/build.sh
+SAT_HOME="$PWD/sat/target/demo/registry" ./sat/target/release/sat uutils \
+  --read ./sat/src::/src head -n 20 /src/main.rs
+printf 'b\na\n' | SAT_HOME="$PWD/sat/target/demo/registry" \
+  ./sat/target/release/sat uutils --stdin sort
+```
+
+Put SAT flags before the utility name; subsequent flags go to the utility.
+`top` needs host process access and is not included in this coreutils component.
+
+## Local execution dashboard
+
+The [Svelte dashboard](dashboard/README.md) shows tool usage as a clickable pie
+chart, plus searchable execution history with timing, status, and complete flags.
+Recording is opt-in and scoped to `SAT_HOME`:
+
+```sh
+sat dashboard enable
+sat dashboard --port 7331   # Opens the local dashboard in your browser.
+sat dashboard disable      # Stop recording, keep history.
+sat dashboard reset        # Delete the database, retain recording preference.
+```
+
+History lives in `SAT_HOME/executions.sqlite3`. Complete command arguments can
+include sensitive values; outputs and piped stdin are not recorded. Opening the
+dashboard does not enable recording. Use `--no-open` to print the URL without
+launching a browser. Production frontend assets are embedded in the host binary.

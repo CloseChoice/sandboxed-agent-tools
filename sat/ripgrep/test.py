@@ -24,7 +24,7 @@ def main():
         (inputs / ".gitignore").write_text("ignored.txt\n")
         (inputs / "ignored.txt").write_text("hello ignored\n")
         # A subtree grant cannot see its parent's .gitignore. Local ignore
-        # rules must prevent scanning generated trees and exhausting fuel.
+        # rules must prevent scanning generated trees and hitting the execution deadline.
         (inputs / ".ignore").write_text((ROOT / "sat/.ignore").read_text())
         (inputs / "binary").write_bytes(b"\0hello binary\n")
         nested = inputs / "nested"

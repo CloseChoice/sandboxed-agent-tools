@@ -36,7 +36,10 @@ def main():
     assert "ValueError: example" in run("raise ValueError('example')", False)
     assert "SystemExit: 2" in run("raise SystemExit(2)", False)
     run("raise SystemExit(0)")
-    assert "fuel" in run("while True: pass", False).lower()
+    started = time.monotonic()
+    assert "tool exceeded 30 seconds" in run("while True: pass", False).lower()
+    assert 29 <= time.monotonic() - started < 45, "CPU-bound guest deadline was not enforced"
+    assert "tool exceeded 30 seconds" in run("import time; time.sleep(60)", False).lower()
 
     with tempfile.TemporaryDirectory(prefix="sat-python-test-") as temp:
         secret = Path(temp) / "secret.txt"
@@ -148,7 +151,7 @@ print("sandbox checks passed")
 
     start = time.monotonic()
     run("print('warm cache')")
-    print(f"PASS: Python code/scripts/encoding/argument validation/imports/errors, -c help, fuel limit, file/directory grants and isolation, read-only enforcement, network/environment denial. Warm invocation: {time.monotonic()-start:.2f}s")
+    print(f"PASS: Python code/scripts/encoding/argument validation/imports/errors, -c help, CPU/host-call execution deadlines, file/directory grants and isolation, read-only enforcement, network/environment denial. Warm invocation: {time.monotonic()-start:.2f}s")
 
 
 if __name__ == "__main__":

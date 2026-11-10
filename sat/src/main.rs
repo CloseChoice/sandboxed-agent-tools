@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand};
-use safe_agent_tools::{home, metadata, runtime::Tool};
+use sandboxed_agent_tools::{home, metadata, runtime::Tool};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
@@ -58,8 +58,29 @@ enum Action {
         #[command(subcommand)]
         command: PythonVenvAction,
     },
+    /// Open the localhost execution dashboard, or manage opt-in history.
+    Dashboard {
+        #[command(subcommand)]
+        command: Option<DashboardAction>,
+        /// Local port for the dashboard (0 chooses an available port).
+        #[arg(long, default_value_t = 7331)]
+        port: u16,
+        /// Print the URL without opening a browser.
+        #[arg(long)]
+        no_open: bool,
+    },
     #[command(external_subcommand)]
     Run(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum DashboardAction {
+    /// Start recording tool invocations, including complete command arguments.
+    Enable,
+    /// Stop recording; keep existing history.
+    Disable,
+    /// Delete the history database; keep the current recording preference.
+    Reset,
 }
 
 #[derive(Subcommand)]
@@ -165,7 +186,23 @@ fn install_bytes(bytes: Vec<u8>, replace: bool) -> Result<()> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
+    match run_cli().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            if let Some(status) =
+                error.downcast_ref::<sandboxed_agent_tools::runtime::CommandExit>()
+            {
+                std::process::ExitCode::from(status.0)
+            } else {
+                eprintln!("Error: {error:?}");
+                std::process::ExitCode::FAILURE
+            }
+        }
+    }
+}
+
+async fn run_cli() -> Result<()> {
     match Cli::parse().command {
         Action::Pack {
             component,
@@ -209,13 +246,63 @@ async fn main() -> Result<()> {
                 registry,
                 replace,
             } => install_bytes(
-                safe_agent_tools::python_venv::build(&requirements, &name, &registry)?,
+                sandboxed_agent_tools::python_venv::build(&requirements, &name, &registry)?,
                 replace,
             )?,
         },
+        Action::Dashboard {
+            command,
+            port,
+            no_open,
+        } => {
+            let root = home()?;
+            match command {
+                Some(DashboardAction::Enable) => {
+                    sandboxed_agent_tools::history::set_enabled(&root, true)?;
+                    println!(
+                        "Execution history enabled. Complete arguments are stored locally in {}.",
+                        root.join("executions.sqlite3").display()
+                    );
+                }
+                Some(DashboardAction::Disable) => {
+                    sandboxed_agent_tools::history::set_enabled(&root, false)?;
+                    println!("Execution history disabled. Existing history is retained.");
+                }
+                Some(DashboardAction::Reset) => {
+                    sandboxed_agent_tools::history::reset(&root)?;
+                    println!("Execution history database deleted. Recording preference unchanged.");
+                }
+                None => sandboxed_agent_tools::dashboard::serve(&root, port, !no_open)?,
+            }
+        }
         Action::Run(args) => {
-            let bytes = installed(&args[0])?;
-            Tool::load(&bytes)?.run(&args[1..]).await?;
+            let started = std::time::Instant::now();
+            let invocation = match home().and_then(|root| {
+                sandboxed_agent_tools::history::Invocation::begin(&root, &args[0], &args[1..])
+            }) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("Could not record execution history: {error:#}");
+                    None
+                }
+            };
+            let result = async {
+                let bytes = installed(&args[0])?;
+                Tool::load(&bytes)?.run(&args[1..]).await
+            }
+            .await;
+            if let Some(invocation) = invocation {
+                let code = result.as_ref().err().map_or(0, |error| {
+                    error
+                        .downcast_ref::<sandboxed_agent_tools::runtime::CommandExit>()
+                        .map_or(1, |code| code.0)
+                });
+                let message = result.as_ref().err().map(|error| format!("{error:#}"));
+                if let Err(error) = invocation.finish(started.elapsed(), code, message.as_deref()) {
+                    eprintln!("Could not finish execution history: {error:#}");
+                }
+            }
+            result?;
         }
     }
     Ok(())

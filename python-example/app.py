@@ -3,12 +3,17 @@ import contextlib
 import io
 import traceback
 
-# componentize-py snapshots imports at build time. Keep this MVP's stdlib explicit.
+# componentize-py snapshots imports at build time. The portable stdlib profile
+# is exercised through WASI in test_stdlib.py; importing alone is insufficient
+# for modules with lazy dependencies.
+import argparse
 import collections
+import csv
 import datetime
 import decimal
 import fractions
 import functools
+import hashlib
 import itertools
 import json
 import math
@@ -16,9 +21,20 @@ import os
 import pathlib
 import random
 import re
+import shutil
 import socket
+import sqlite3
 import statistics
 import sys
+import tarfile
+import tomllib
+import zipfile
+
+# Lazy dependencies used by the profile's supported operations.
+import _strptime
+import encodings.cp437
+import gzip
+import locale
 
 import wit_world
 from componentize_py_types import Err

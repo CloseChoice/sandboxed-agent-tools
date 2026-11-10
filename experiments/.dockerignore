@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!package.json
+!package-lock.json
+!agent-extension.ts
+!container-run.py
+!reporting.py
+!tool_config.py
+!task_prompts.py

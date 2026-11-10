@@ -1,4 +1,4 @@
-# Safe agent tools
+# Sandboxed Agent Tools
 
 - [FFF fuzzy matching library](fuzzy-search/README.md): a self-contained WebAssembly fuzzy matcher. All source, dependencies, build configuration, scripts, tests, and examples are in `fuzzy-search/`.
 - [File-content search CLI](#search-file-contents-with-wasmtime): a sandboxed literal search tool in `cli/`.

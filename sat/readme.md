@@ -1,4 +1,4 @@
-# SAT: Safe Agent Toolbox
+# SAT: Sandboxed Agent Tools
 
 SAT is the native host for discovering and executing sandboxed tools. The current
 implementation is a CLI and runtime scaffold; it does not execute tools yet.

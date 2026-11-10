@@ -102,6 +102,10 @@ artifacts:
 - Scientific/data packages such as NumPy, pandas, SciPy, and PyTorch.
 - Packages such as Pillow, cryptography, lxml, or orjson.
 - Pydantic's `pydantic-core` dependency, which contains a compiled extension.
+- LiteLLM 1.106.2: PyPI publishes platform/ABI-specific wheels for this release,
+  but no `py3-none-any` wheel, so SAT's current universal-wheel resolver rejects
+  it. Its dependency tree also includes packages with native wheels, such as
+  `tokenizers` and `tiktoken` on supported Python versions.
 
 WASI-specific wheels are not accepted by the current resolver yet either. SAT
 would need a WASI wheel tag/ABI selection path before those artifacts can be
@@ -123,3 +127,16 @@ During componentization, SAT imports detected top-level modules and executes
 Python startup hooks from the wheels inside the WASI build guest. That catches
 many missing-import and initialization problems during the build, but it does
 not test every lazy import path or runtime operation.
+
+Tools wrapping upstream stdio-based code may set `command_output = true`.
+Their entrypoint must return one `s32` exit status (0–255), and this mode conflicts
+with `verbatim_output`. SAT captures WASI stdout and stderr separately, each below
+8 MiB, and never inherits host stdio or environment. The optional `stdin` string
+parameter is also supplied as private WASI stdin. Default CLI output preserves
+bytes and exit status; `--json` returns `stdout`, `stderr`, and `exit_code`, using
+byte arrays for non-UTF-8 streams. This is an adapter for command libraries;
+structured WIT return values remain the preferred data transport.
+
+A final positional `list<string>` (or optional list) accepts trailing arguments
+including flags. Host options must precede that positional tail. In command-output
+mode, positional values also form the guest's WASI argv after the tool name.

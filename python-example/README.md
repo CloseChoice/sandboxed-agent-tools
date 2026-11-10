@@ -9,7 +9,7 @@ From the repository root:
 ```sh
 python3 python-example/build.py
 export SAT_HOME="$PWD/sat/target/demo/registry"
-export PATH="$PWD/sat/target/debug:$PATH"
+export PATH="$PWD/sat/target/release:$PATH"
 
 sat python --help
 sat python -c 'print(1 + 2)'
@@ -19,7 +19,9 @@ sat python -c 'import json; print(json.dumps({"hello": "wasi"}))'
 ```
 
 The builder uses a project-local virtual environment and needs Python with `venv`
-and pip, plus Rust. Only the build step needs native Python. It registers in the
+and pip, plus Rust. It builds/uses the release SAT host by default;
+`SAT_BUILD_PROFILE=debug` selects the debug host. Only the build step needs native
+Python. It registers in the
 existing demo registry unless `SAT_HOME` is set. Re-running the builder explicitly
 replaces the installed `python` package. `--no-install` only builds/packages it.
 The first Wasmtime compilation can take a few minutes with a debug SAT build;
@@ -57,12 +59,47 @@ is only presentation. Each invocation gets a new component instance.
 
 ## Imports and packages
 
-This minimal build preloads: `collections`, `datetime`, `decimal`, `fractions`,
-`functools`, `itertools`, `json`, `math`, `os`, `pathlib`, `random`, `re`, `socket`,
-`statistics`, and `sys`, plus the wrapper's dependencies. Modules can be imported
-by submitted code after preloading, but OS operations still require capabilities.
-Not every standard-library module is included. `componentize-py` snapshots imports
-at build time; there is no runtime pip or arbitrary PyPI compatibility here.
+The portable standard-library profile has one functional WASI test for each of
+these 20 modules in [`test_stdlib.py`](test_stdlib.py). The list prioritizes
+repository scripting, data processing, configuration, and archive handling:
+
+| Module | Tested operation |
+| --- | --- |
+| `collections` | `Counter([1, 2, 3, 3])` gives counts `{1: 1, 2: 1, 3: 2}` |
+| `itertools` | Slice an infinite `count` iterator |
+| `functools` | Memoize a function and verify a cache hit |
+| `pathlib` | Read UTF-8 file contents and glob granted paths |
+| `os` | Stat, list, and manipulate path names inside a read grant |
+| `json` | Round-trip a nested object containing Unicode |
+| `re` | Extract named regex groups from multiple matches |
+| `datetime` | Parse a date with `strptime` and add a day |
+| `math` | Square root and factorial |
+| `statistics` | Mean and median |
+| `decimal` | Exact decimal arithmetic in a local context |
+| `fractions` | Add and normalize rational numbers |
+| `hashlib` | Verify SHA-256 against a known digest |
+| `csv` | Read a quoted field containing a comma |
+| `tomllib` | Parse a TOML table with string and boolean values |
+| `argparse` | Parse a typed argument and generate help |
+| `shutil` | Copy a file to an explicitly granted output file |
+| `tarfile` | Create and read a gzip-compressed tar archive in memory |
+| `zipfile` | Create and read a deflated ZIP archive in memory |
+| `sqlite3` | Create an in-memory database, insert rows, and query an aggregate |
+
+Every test runs its imports, operations, and assertions through `sat python`
+and verifies `sys.platform == "wasi"`. The native test driver only builds the
+component, creates fixtures, and checks results. It uses a private registry,
+read-only fixture access, and one exact-file write grant for the copy test.
+These are smoke tests for the listed operations, not complete stdlib conformance.
+
+The build explicitly preloads these modules and lazy dependencies such as
+`locale`, `_strptime`, the ZIP filename codec `encodings.cp437`, and `gzip`.
+It also retains `random`, `socket`, `sys`, and the wrapper's support imports.
+Submitted code can import captured modules, but OS operations still require
+host-granted capabilities. `componentize-py` snapshots imports at build time:
+an import may succeed while an untested operation still needs another lazy
+dependency. There is no runtime pip or arbitrary PyPI compatibility here.
+
 The current WASI CPython runtime lacks the optional `_bz2` and `_lzma` native
 extensions, so importing `bz2` or `lzma` fails even though those are standard
 library modules. NetworkX currently hits this through its import chain and cannot
@@ -89,13 +126,16 @@ CPython ABI; host Linux/macOS/Windows wheels will not work.
 
 Cache future environments by a normalized specification: interpreter and builder
 versions, WASI target, sorted pinned dependencies/artifact hashes, and wrapper
-source. Equivalent specs reuse builds; changed specs produce a new component.
+source (including the stdlib profile). Equivalent specs reuse builds; changed
+specs produce a new component. SAT's generated Python environments share this
+wrapper, so the profile applies to them when the host is rebuilt too.
 This builder already caches its exact builder/source specification and verifies
 its cached Wasm digest. SAT separately verifies the final installed package hash.
 
 ## Checks
 
 ```sh
+python3 python-example/test_stdlib.py # 20 functional stdlib tests through WASI
 python3 python-example/test.py
 ```
 

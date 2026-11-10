@@ -13,7 +13,10 @@ BUILDER = "0.25.0"
 TARGET = ROOT / "target"
 
 
-def build(install=True):
+def build(install=True, sat_home=None):
+    profile = os.environ.get("SAT_BUILD_PROFILE", "release")
+    if profile not in ("release", "debug"):
+        raise ValueError("SAT_BUILD_PROFILE must be release or debug")
     TARGET.mkdir(exist_ok=True)
     builder = TARGET / "builder"
     executable_dir = builder / ("Scripts" if os.name == "nt" else "bin")
@@ -46,12 +49,21 @@ def build(install=True):
     else:
         print("Reusing cached Python component.", flush=True)
 
-    subprocess.run(["cargo", "build", "--locked", "--manifest-path", str(REPO / "sat/Cargo.toml")], cwd=REPO, check=True)
-    sat = REPO / "sat/target/debug" / ("sat.exe" if os.name == "nt" else "sat")
+    command = ["cargo", "build", "--locked", "--manifest-path", str(REPO / "sat/Cargo.toml")]
+    if profile == "release":
+        command.append("--release")
+    subprocess.run(command, cwd=REPO, check=True)
+    sat = REPO / f"sat/target/{profile}" / ("sat.exe" if os.name == "nt" else "sat")
     # Use the same demo registry as sat/demo.py, unless the caller chooses another.
     env = dict(os.environ)
-    env.setdefault("SAT_HOME", str(REPO / "sat/target/demo/registry"))
-    package = TARGET / "python.wasm"
+    if sat_home is not None:
+        env["SAT_HOME"] = str(sat_home)
+    else:
+        env.setdefault("SAT_HOME", str(REPO / "sat/target/demo/registry"))
+    # Private test registries get a private package too; only the raw component
+    # cache is shared with ordinary builds.
+    package = (Path(sat_home).parent / "python.wasm") if sat_home is not None else TARGET / "python.wasm"
+    package.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([str(sat), "pack", str(raw), "--metadata", str(ROOT / "tool.toml"),
                     "--policy", str(ROOT / "policy.toml"), "-o", str(package)], env=env, check=True)
     if install:

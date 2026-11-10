@@ -1,0 +1,14 @@
+{
+  "model": null,
+  "thinking": "medium",
+  "timeout_seconds": 900,
+  "max_tool_calls": 80,
+  "cpus": 2,
+  "memory": "4g",
+  "seed": 42,
+  "sat_binary": "../sat/target/release/sat",
+  "sat_registry": "../sat/target/demo/registry",
+  "models_file": "~/.pi/agent/models.json",
+  "credential_env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "SCW_SECRET_KEY", "OPENROUTER_API_KEY"],
+  "variants": ["baseline", "sat", "rtk", "sat_rtk"]
+}

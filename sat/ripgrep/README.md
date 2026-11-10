@@ -64,7 +64,7 @@ only `./sat` hides the repository root's `.gitignore`; `sat/.ignore` therefore
 contains `target/` so searches skip build output, including nested crate builds.
 For other projects, put appropriate rules in an `.ignore` file inside the granted
 directory, or grant and search the repository root so its `.gitignore` is visible.
-The compute budget can still stop large searches; narrow `--paths` when needed.
+The execution deadline can still stop large searches; narrow `--paths` when needed.
 
 This repository has `TemporaryDirectory` matches in its Python tests (and no
 `Temporary` matches in `sat/src`). From the repository root, this returns matches:
@@ -79,8 +79,9 @@ Limits: 4 KiB patterns, 128 input roots, 100 context lines, 10,000 returned line
 16 MiB search buffer. `--max-results` defaults to 100 and counts context lines.
 `truncated` is conservatively true whenever an output limit stops the search,
 including when the last returned line happens to be the last match. Context
-can therefore be cut short. SAT also enforces its memory, fuel, and time limits;
-this package requests 1 billion fuel for regex compilation and traversal.
+can therefore be cut short. SAT also enforces its guest memory limit and a
+30-second execution deadline using epoch interruption. Legacy fuel metadata
+is ignored.
 
 Verify matching, limits, and actual WASI filesystem confinement:
 

@@ -4,8 +4,6 @@ use std::collections::BTreeMap;
 use wasm_encoder::Encode;
 use wasmparser::{Encoding, Parser, Payload};
 
-pub const MAX_FUEL: u64 = 1_000_000_000;
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tool {
@@ -21,7 +19,7 @@ pub struct Tool {
     pub examples: Vec<Example>,
     #[serde(default)]
     pub exactly_one_of: Vec<String>,
-    /// Requested Wasmtime fuel. The host enforces a hard maximum.
+    /// Legacy package field accepted for compatibility; execution uses epoch deadlines.
     #[serde(default)]
     pub fuel: Option<u64>,
     /// Optional string parameter filled only when the caller passes --stdin.
@@ -30,6 +28,9 @@ pub struct Tool {
     /// Present a returned string without adding a newline (e.g. jq -j).
     #[serde(default)]
     pub verbatim_output: bool,
+    /// Capture bounded WASI stdio; entrypoint returns a command exit status.
+    #[serde(default)]
+    pub command_output: bool,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -128,10 +129,6 @@ impl Package {
         let policy_text = sections.remove("sat.policy.v1");
         let tool: Tool = toml::from_str(&tool_text).context("invalid tool metadata")?;
         ensure!(
-            tool.fuel.is_none_or(|fuel| (1_000_000..=MAX_FUEL).contains(&fuel)),
-            "tool fuel must be between 1,000,000 and 1,000,000,000"
-        );
-        ensure!(
             valid_name(&tool.name),
             "tool name must contain only letters, digits, hyphens and underscores"
         );
@@ -227,6 +224,18 @@ pub fn wit(bytes: &[u8]) -> Result<String> {
 mod tests {
     use super::*;
     const TOOL: &str = "name='sample'\nversion='1'\ndescription='demo'\nentrypoint='run'\n";
+
+    #[test]
+    fn legacy_fuel_metadata_is_optional_and_accepted() {
+        let bytes = embed(wasm_encoder::Component::new().finish(), TOOL, None).unwrap();
+        assert!(Package::read(&bytes).unwrap().tool.fuel.is_none());
+        let tool = format!("{TOOL}fuel=1000000000000\n");
+        let bytes = embed(wasm_encoder::Component::new().finish(), &tool, None).unwrap();
+        assert_eq!(
+            Package::read(&bytes).unwrap().tool.fuel,
+            Some(1_000_000_000_000)
+        );
+    }
 
     #[test]
     fn missing_policy_is_unrestricted_but_invalid_or_duplicate_is_rejected() {

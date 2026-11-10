@@ -1,9 +1,9 @@
 [package]
-name = "safe-agent-tools"
+name = "sandboxed-agent-tools"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Safe Agent Toolbox"
+description = "Sandboxed Agent Tools"
 
 [[bin]]
 name = "sat"
@@ -26,3 +26,8 @@ http = "1"
 http-body-util = "0.1"
 cap-std = "4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+tiny_http = "0.12.0"
+fs2 = "0.4.3"
+webbrowser = "1.2.6"
+url = "2.5.8"

@@ -16,3 +16,21 @@ dist/
 
 # Local editor logs
 nvim.log
+
+# Local credentials and development environments
+keys.md
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+.ipynb_checkpoints/
+
+# Local document inputs; keep only the fictional, reproducible walkthrough.
+/data/*
+!/data/signature-workflow/

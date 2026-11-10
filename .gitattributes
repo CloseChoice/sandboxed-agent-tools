@@ -1,0 +1,8 @@
+# Dashboard sources are authoritative; Vite rebuilds these minified bundles.
+sat/dashboard/assets/** linguist-generated=true
+sat/dashboard/assets/assets/*.js -diff
+sat/dashboard/assets/assets/*.css -diff
+
+# Preserve patch context and the human-owned architecture notes verbatim.
+experiments/fuel-1trillion.patch whitespace=-blank-at-eol
+sat/new_architeccture.md whitespace=-blank-at-eol

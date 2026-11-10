@@ -1,0 +1,10 @@
+results/
+.env
+__pycache__/
+node_modules/
+.build/
+
+# Downloaded upstream repositories and machine-specific preview output
+/SWE-bench/
+/swe-bench-tasks/
+/results.txt

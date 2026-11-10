@@ -128,9 +128,9 @@ Current limitations:
 
 Limits: 64 KiB filter source, 128 input files, 8 MiB aggregate input-file/inline
 data, 100,000 input/output values, and 8 MiB output. Variable values supplied
-directly as CLI arguments also remain subject to the host memory/fuel limits.
-The host additionally enforces a 64 MiB guest memory limit, 1 billion fuel, and
-its execution timeout. Limit failures are explicit, with no silent partial data.
+directly as CLI arguments also remain subject to the host memory limit.
+The host additionally enforces a 64 MiB guest memory limit and a 30-second
+execution deadline using epoch interruption. Limit failures are explicit, with no silent partial data.
 
 ## Checks
 

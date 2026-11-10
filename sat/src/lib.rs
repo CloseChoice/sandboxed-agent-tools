@@ -1,4 +1,6 @@
+pub mod dashboard;
 pub mod files;
+pub mod history;
 pub mod metadata;
 pub mod permissions;
 pub mod python_venv;

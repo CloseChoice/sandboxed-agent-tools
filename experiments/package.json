@@ -1,0 +1,12 @@
+{
+  "name": "sat-rtk-swebench-experiments",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types test_extension.mjs && node --experimental-strip-types test_pi_tools.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "typebox": "1.3.27"
+  }
+}
