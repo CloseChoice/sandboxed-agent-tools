@@ -1,7 +1,7 @@
 //! Embedded component runner. Guest authority comes only from effective settings.
 
 use crate::{
-    files::{self, Capability},
+    files::{self, FilesystemImport},
     metadata::valid_name,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -13,21 +13,21 @@ use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView, WasiHttpView};
 
-pub struct State {
+pub struct RuntimeState {
     pub(crate) wasi: WasiCtx,
     http: WasiHttpCtx,
     pub(crate) table: ResourceTable,
-    pub(crate) grant_roots: Vec<(String, crate::grants::GrantRoot)>,
+    pub(crate) granted_descriptors: Vec<(String, crate::grants::GrantedDescriptor)>,
     pub(crate) descriptor_paths: std::collections::BTreeMap<u32, String>,
     pub(crate) guest_cwd: Option<String>,
-    pub(crate) single_files: Vec<(wasmtime_wasi::filesystem::File, String)>,
-    policy: crate::config::HttpPermissions,
-    pub files: files::Bindings,
+    pub(crate) single_file_preopens: Vec<(wasmtime_wasi::filesystem::File, String)>,
+    http_permissions: crate::config::HttpPermissions,
+    pub files: files::FilesystemBindings,
     pub(crate) access: crate::access::Access,
-    pub(crate) stream_paths: std::collections::BTreeMap<u32, String>,
+    pub(crate) directory_stream_paths: std::collections::BTreeMap<u32, String>,
 }
 
-impl WasiView for State {
+impl WasiView for RuntimeState {
     fn ctx(&mut self) -> WasiCtxView<'_> {
         WasiCtxView {
             ctx: &mut self.wasi,
@@ -36,28 +36,28 @@ impl WasiView for State {
     }
 }
 
-impl WasiHttpView for State {
+impl WasiHttpView for RuntimeState {
     fn http(&mut self) -> WasiHttpCtxView<'_> {
         WasiHttpCtxView {
             ctx: &mut self.http,
             table: &mut self.table,
-            hooks: &mut self.policy,
+            hooks: &mut self.http_permissions,
         }
     }
 }
 
-pub struct Tool {
-    pub metadata: crate::metadata::Tool,
+pub struct LoadedTool {
+    pub metadata: crate::metadata::ToolMetadata,
     engine: Engine,
     component: Component,
-    linker: Linker<State>,
+    linker: Linker<RuntimeState>,
     pub params: Vec<(String, Type)>,
-    pub caps: Vec<Capability>,
+    pub filesystem_imports: Vec<FilesystemImport>,
     pub uses_http: bool,
 }
 
-impl Tool {
-    pub fn load(bytes: &[u8], metadata: crate::metadata::Tool) -> Result<Self> {
+impl LoadedTool {
+    pub fn load(bytes: &[u8], metadata: crate::metadata::ToolMetadata) -> Result<Self> {
         let mut config = Config::new();
         config.cranelift_opt_level(wasmtime::OptLevel::None);
         let engine = Engine::new(&config)?;
@@ -73,11 +73,11 @@ impl Tool {
         let params: Vec<_> = func.params().map(|(n, t)| (n.to_owned(), t)).collect();
         for (_, ty) in &params {
             ensure!(
-                supported(ty),
+                is_supported_argument_type(ty),
                 "MVP arguments support string, bool, scalar numbers and options of those types"
             );
         }
-        let caps = files::discover(&engine, &component)?;
+        let filesystem_imports = files::discover_filesystem_imports(&engine, &component)?;
         let mut names: BTreeSet<String> = ["help", "json"].map(str::to_owned).into();
         let mut shorts = BTreeSet::from(['h']);
         for option in metadata.options.values() {
@@ -104,7 +104,7 @@ impl Tool {
                 .find(|(n, _)| n == name)
                 .with_context(|| format!("unknown WIT parameter {name}"))?;
             if let Some(default) = metadata.options.get(name).and_then(|o| o.default.as_ref()) {
-                parse_value(ty, &default_text(default)?)?;
+                parse_argument_value(ty, &format_default_value(default)?)?;
             }
             mapped.insert(name.clone());
         }
@@ -115,12 +115,12 @@ impl Tool {
         let mut optional_seen = false;
         for argument in &metadata.arguments {
             let ty = &params.iter().find(|(n, _)| n == &argument.name).unwrap().1;
-            let optional = matches!(ty, Type::Option(_));
+            let is_optional_parameter = matches!(ty, Type::Option(_));
             ensure!(
-                !optional_seen || optional,
+                !optional_seen || is_optional_parameter,
                 "required positional arguments must precede optional ones"
             );
-            optional_seen |= optional;
+            optional_seen |= is_optional_parameter;
         }
         let choice = &metadata.exactly_one_of;
         if !choice.is_empty() {
@@ -146,11 +146,11 @@ impl Tool {
                 );
             }
         }
-        for cap in &caps {
+        for filesystem_import in &filesystem_imports {
             ensure!(
-                valid_name(&cap.name) && names.insert(cap.name.clone()),
+                valid_name(&filesystem_import.name) && names.insert(filesystem_import.name.clone()),
                 "invalid or conflicting resource name {}",
-                cap.name
+                filesystem_import.name
             );
         }
         let uses_http = component_type
@@ -159,8 +159,8 @@ impl Tool {
         let mut linker = Linker::new(&engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
-        files::link(&mut linker, &caps)?;
-        crate::grants::link(&mut linker)?;
+        files::link_filesystem_imports(&mut linker, &filesystem_imports)?;
+        crate::grants::link_filesystem_permissions(&mut linker)?;
         // Resolves imports and checks their types without executing guest code.
         linker.instantiate_pre(&component)?;
         Ok(Self {
@@ -169,12 +169,12 @@ impl Tool {
             component,
             linker,
             params,
-            caps,
+            filesystem_imports,
             uses_http,
         })
     }
 
-    fn optional(&self, name: &str) -> bool {
+    fn is_optional_parameter(&self, name: &str) -> bool {
         self.params
             .iter()
             .any(|(n, t)| n == name && matches!(t, Type::Option(_)))
@@ -195,7 +195,7 @@ impl Tool {
             cmd = cmd.arg(
                 Arg::new(spec.name.clone())
                     .index(i + 1)
-                    .required(!self.optional(&spec.name))
+                    .required(!self.is_optional_parameter(&spec.name))
                     .help(spec.help.clone()),
             );
         }
@@ -207,9 +207,9 @@ impl Tool {
                 arg = arg.short(short);
             }
             if let Some(value) = &spec.default {
-                arg = arg.default_value(default_text(value)?);
+                arg = arg.default_value(format_default_value(value)?);
             } else {
-                arg = arg.required(!self.optional(name));
+                arg = arg.required(!self.is_optional_parameter(name));
             }
             cmd = cmd.arg(arg);
         }
@@ -221,16 +221,20 @@ impl Tool {
                     .multiple(false),
             );
         }
-        for cap in &self.caps {
+        for filesystem_import in &self.filesystem_imports {
             cmd = cmd.arg(
-                Arg::new(cap.name.clone())
-                    .long(cap.name.clone())
+                Arg::new(filesystem_import.name.clone())
+                    .long(filesystem_import.name.clone())
                     .required(true)
                     .value_name("PATH")
                     .help(format!(
                         "Bind a {} ({})",
-                        if cap.directory { "directory" } else { "file" },
-                        if cap.write {
+                        if filesystem_import.directory {
+                            "directory"
+                        } else {
+                            "file"
+                        },
+                        if filesystem_import.write {
                             "requires a matching write grant"
                         } else {
                             "read-only"
@@ -255,7 +259,7 @@ impl Tool {
     pub async fn run(
         &self,
         args: &[String],
-        settings: &crate::config::Settings,
+        settings: &crate::config::ToolSettings,
         home: &Path,
         cwd: &Path,
     ) -> Result<()> {
@@ -265,7 +269,7 @@ impl Tool {
                 serde_json::to_string_pretty(&json!({
                     "tool": self.metadata,
                     "parameters": self.params.iter().map(|(name,t)| json!({"name":name,"type":format!("{t:?}")})).collect::<Vec<_>>(),
-                    "resources": self.caps, "uses_http": self.uses_http,
+                    "resources": self.filesystem_imports, "uses_http": self.uses_http,
                     "permissions": ["--read", "--write", "--deny-read", "--deny-write", "--allow-http", "--deny-http"],
                 }))?
             );
@@ -285,19 +289,19 @@ impl Tool {
             .params
             .iter()
             .map(|(n, t)| match matches.get_one::<String>(n) {
-                Some(v) => parse_value(t, v),
+                Some(v) => parse_argument_value(t, v),
                 None if matches!(t, Type::Option(_)) => Ok(Val::Option(None)),
                 None => bail!("missing parameter {n}"),
             })
             .collect::<Result<Vec<_>>>()?;
         let access = crate::access::Access::new(&settings.file_permissions, home, cwd)?;
-        let mut bindings = files::Bindings::new();
-        for cap in &self.caps {
+        let mut bindings = files::FilesystemBindings::new();
+        for filesystem_import in &self.filesystem_imports {
             bindings.insert(
-                cap.name.clone(),
-                files::open(
-                    cap,
-                    matches.get_one::<String>(&cap.name).unwrap(),
+                filesystem_import.name.clone(),
+                files::bind_filesystem_import(
+                    filesystem_import,
+                    matches.get_one::<String>(&filesystem_import.name).unwrap(),
                     &access,
                     home,
                     cwd,
@@ -308,19 +312,19 @@ impl Tool {
         wasi.allow_tcp(false)
             .allow_udp(false)
             .allow_ip_name_lookup(false);
-        let single_files = crate::grants::configure(&mut wasi, &access)?;
+        let single_file_preopens = crate::grants::configure_preopens(&mut wasi, &access)?;
         let mut store = Store::new(
             &self.engine,
-            State {
+            RuntimeState {
                 wasi: wasi.build(),
-                single_files,
+                single_file_preopens,
                 guest_cwd: None,
-                grant_roots: Vec::new(),
+                granted_descriptors: Vec::new(),
                 descriptor_paths: Default::default(),
-                stream_paths: Default::default(),
+                directory_stream_paths: Default::default(),
                 http: WasiHttpCtx::new(),
                 table: ResourceTable::new(),
-                policy: settings.http_permissions.clone(),
+                http_permissions: settings.http_permissions.clone(),
                 files: bindings,
                 access,
             },
@@ -335,7 +339,10 @@ impl Tool {
         let mut results = vec![Val::Bool(false); f.ty(&store).results().len()];
         f.call_async(&mut store, &params, &mut results).await?;
         f.post_return_async(&mut store).await?;
-        let mut output = results.iter().map(to_json).collect::<Result<Vec<_>>>()?;
+        let mut output = results
+            .iter()
+            .map(component_value_to_json)
+            .collect::<Result<Vec<_>>>()?;
         let result = if output.len() == 1 {
             output.remove(0)
         } else {
@@ -352,9 +359,9 @@ impl Tool {
     }
 }
 
-fn supported(t: &Type) -> bool {
+fn is_supported_argument_type(t: &Type) -> bool {
     if let Type::Option(inner) = t {
-        return !matches!(inner.ty(), Type::Option(_)) && supported(&inner.ty());
+        return !matches!(inner.ty(), Type::Option(_)) && is_supported_argument_type(&inner.ty());
     }
     matches!(
         t,
@@ -369,7 +376,7 @@ fn supported(t: &Type) -> bool {
     )
 }
 
-fn default_text(v: &toml::Value) -> Result<String> {
+fn format_default_value(v: &toml::Value) -> Result<String> {
     Ok(match v {
         toml::Value::String(s) => s.clone(),
         toml::Value::Integer(_) | toml::Value::Boolean(_) | toml::Value::Float(_) => v.to_string(),
@@ -377,9 +384,11 @@ fn default_text(v: &toml::Value) -> Result<String> {
     })
 }
 
-fn parse_value(ty: &Type, text: &str) -> Result<Val> {
+fn parse_argument_value(ty: &Type, text: &str) -> Result<Val> {
     Ok(match ty {
-        Type::Option(inner) => Val::Option(Some(Box::new(parse_value(&inner.ty(), text)?))),
+        Type::Option(inner) => {
+            Val::Option(Some(Box::new(parse_argument_value(&inner.ty(), text)?)))
+        }
         Type::String => Val::String(text.into()),
         Type::Bool => Val::Bool(text.parse()?),
         Type::U32 => Val::U32(text.parse()?),
@@ -392,7 +401,7 @@ fn parse_value(ty: &Type, text: &str) -> Result<Val> {
     })
 }
 
-fn to_json(v: &Val) -> Result<Json> {
+fn component_value_to_json(v: &Val) -> Result<Json> {
     Ok(match v {
         Val::String(s) => json!(s),
         Val::Bool(v) => json!(v),
@@ -406,21 +415,24 @@ fn to_json(v: &Val) -> Result<Json> {
         Val::S64(v) => json!(v),
         Val::Float32(v) => json!(v),
         Val::Float64(v) => json!(v),
-        Val::List(items) | Val::Tuple(items) => {
-            Json::Array(items.iter().map(to_json).collect::<Result<_>>()?)
-        }
+        Val::List(items) | Val::Tuple(items) => Json::Array(
+            items
+                .iter()
+                .map(component_value_to_json)
+                .collect::<Result<_>>()?,
+        ),
         Val::Record(fields) => Json::Object(
             fields
                 .iter()
-                .map(|(k, v)| Ok((k.clone(), to_json(v)?)))
+                .map(|(k, v)| Ok((k.clone(), component_value_to_json(v)?)))
                 .collect::<Result<_>>()?,
         ),
-        Val::Result(Ok(Some(v))) | Val::Option(Some(v)) => to_json(v)?,
+        Val::Result(Ok(Some(v))) | Val::Option(Some(v)) => component_value_to_json(v)?,
         Val::Result(Ok(None)) | Val::Option(None) => Json::Null,
         Val::Result(Err(v)) => bail!(
             "tool error: {}",
             v.as_ref()
-                .map(|v| to_json(v))
+                .map(|v| component_value_to_json(v))
                 .transpose()?
                 .unwrap_or(Json::Null)
         ),

@@ -1,8 +1,8 @@
 //! Three-file registry; archives are data and are never executed at registration.
 
 use crate::{
-    config::{self, Configuration, Settings},
-    metadata::{self, Tool},
+    config::{self, Configuration, ToolSettings},
+    metadata::{self, ToolMetadata},
     runtime,
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -13,9 +13,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const FILES: [&str; 3] = ["tool.wasm", "tool.toml", "defaults.toml"];
+const REQUIRED_PACKAGE_FILES: [&str; 3] = ["tool.wasm", "tool.toml", "defaults.toml"];
 
-pub fn names(home: &Path) -> Result<Vec<String>> {
+pub fn registered_tool_names(home: &Path) -> Result<Vec<String>> {
     let root = home.join("tools");
     if !root.exists() {
         return Ok(vec![]);
@@ -33,7 +33,7 @@ pub fn names(home: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-pub fn directory(home: &Path, name: &str) -> Result<PathBuf> {
+pub fn registered_tool_directory(home: &Path, name: &str) -> Result<PathBuf> {
     ensure!(
         metadata::valid_name(name) && !metadata::RESERVED.contains(&name),
         "invalid tool name"
@@ -50,14 +50,18 @@ pub fn directory(home: &Path, name: &str) -> Result<PathBuf> {
     Ok(dir)
 }
 
-pub fn load(home: &Path, name: &str) -> Result<runtime::Tool> {
-    let dir = directory(home, name)?;
-    let metadata = Tool::parse(&fs::read_to_string(dir.join("tool.toml"))?)?;
+pub fn load(home: &Path, name: &str) -> Result<runtime::LoadedTool> {
+    let dir = registered_tool_directory(home, name)?;
+    let metadata = ToolMetadata::parse(&fs::read_to_string(dir.join("tool.toml"))?)?;
     ensure!(metadata.name == name, "registered tool name mismatch");
-    runtime::Tool::load(&fs::read(dir.join("tool.wasm"))?, metadata)
+    runtime::LoadedTool::load(&fs::read(dir.join("tool.wasm"))?, metadata)
 }
 
-fn insert(files: &mut BTreeMap<String, Vec<u8>>, name: &str, mut entry: impl Read) -> Result<()> {
+fn read_archive_entry(
+    files: &mut BTreeMap<String, Vec<u8>>,
+    name: &str,
+    mut entry: impl Read,
+) -> Result<()> {
     ensure!(!files.contains_key(name), "duplicate archive entry {name}");
     let mut bytes = vec![];
     entry.read_to_end(&mut bytes)?;
@@ -71,14 +75,14 @@ pub fn extract(path: &Path, zip: bool, destination: &Path) -> Result<()> {
         let mut archive = zip::ZipArchive::new(fs::File::open(path)?)?;
         for i in 0..archive.len() {
             let entry = archive.by_index(i)?;
-            if FILES.contains(&entry.name()) {
+            if REQUIRED_PACKAGE_FILES.contains(&entry.name()) {
                 let mode = entry.unix_mode().unwrap_or(0o100644) & 0o170000;
                 ensure!(
                     !entry.is_dir() && (mode == 0 || mode == 0o100000),
                     "required archive entries must be regular files"
                 );
                 let name = entry.name().to_owned();
-                insert(&mut files, &name, entry)?;
+                read_archive_entry(&mut files, &name, entry)?;
             }
         }
     } else {
@@ -86,16 +90,19 @@ pub fn extract(path: &Path, zip: bool, destination: &Path) -> Result<()> {
         for entry in archive.entries()? {
             let entry = entry?;
             let name = entry.path_bytes();
-            if let Some(expected) = FILES.iter().find(|n| n.as_bytes() == name.as_ref()) {
+            if let Some(expected) = REQUIRED_PACKAGE_FILES
+                .iter()
+                .find(|n| n.as_bytes() == name.as_ref())
+            {
                 ensure!(
                     entry.header().entry_type().is_file(),
                     "required archive entries must be regular files"
                 );
-                insert(&mut files, expected, entry)?;
+                read_archive_entry(&mut files, expected, entry)?;
             }
         }
     }
-    for name in FILES {
+    for name in REQUIRED_PACKAGE_FILES {
         ensure!(
             files.contains_key(name),
             "archive missing root-level {name}"
@@ -107,7 +114,7 @@ pub fn extract(path: &Path, zip: bool, destination: &Path) -> Result<()> {
     Ok(())
 }
 
-fn suggestions(text: &str) -> Result<Settings> {
+fn parse_suggested_permissions(text: &str) -> Result<ToolSettings> {
     let mut value: toml::Value = toml::from_str(text)?;
     let root = value
         .as_table_mut()
@@ -132,19 +139,19 @@ fn suggestions(text: &str) -> Result<Settings> {
             toml::Value::Array(vec![]),
         )]))
     });
-    let settings: Settings = value.try_into()?;
+    let settings: ToolSettings = value.try_into()?;
     settings.http_permissions.validate()?;
     Ok(settings)
 }
 
-fn display(value: &Option<Vec<String>>) -> String {
+fn format_permission_list(value: &Option<Vec<String>>) -> String {
     value
         .as_ref()
         .map(|v| serde_json::to_string(v).unwrap())
         .unwrap_or_else(|| "unset".into())
 }
 
-fn prompt(
+fn prompt_permission_list(
     input: &mut impl BufRead,
     output: &mut impl Write,
     name: &str,
@@ -155,7 +162,7 @@ fn prompt(
         write!(
             output,
             "{name} = {} [Y to accept, array to replace{}]: ",
-            display(suggestion),
+            format_permission_list(suggestion),
             if http {
                 ", unset to disable this list"
             } else {
@@ -195,36 +202,41 @@ fn prompt(
     }
 }
 
-fn choose(
-    mut s: Settings,
+fn review_suggested_permissions(
+    mut settings: ToolSettings,
     home: &Path,
     cwd: &Path,
     input: &mut impl BufRead,
     output: &mut impl Write,
-) -> Result<Settings> {
+) -> Result<ToolSettings> {
     writeln!(
         output,
         "Suggested permissions:\nread = {}\nwrite = {}\ndeny-read = {}\ndeny-write = {}\nallow-http = {}\ndeny-http = {}",
-        display(&Some(s.file_permissions.read.clone())),
-        display(&Some(s.file_permissions.write.clone())),
-        display(&Some(s.file_permissions.deny_read.clone())),
-        display(&Some(s.file_permissions.deny_write.clone())),
-        display(&s.http_permissions.allow_http),
-        display(&s.http_permissions.deny_http)
+        format_permission_list(&Some(settings.file_permissions.read.clone())),
+        format_permission_list(&Some(settings.file_permissions.write.clone())),
+        format_permission_list(&Some(settings.file_permissions.deny_read.clone())),
+        format_permission_list(&Some(settings.file_permissions.deny_write.clone())),
+        format_permission_list(&settings.http_permissions.allow_http),
+        format_permission_list(&settings.http_permissions.deny_http)
     )?;
     for (name, value, deny) in [
-        ("read", &mut s.file_permissions.read, false),
-        ("write", &mut s.file_permissions.write, false),
-        ("deny-read", &mut s.file_permissions.deny_read, true),
-        ("deny-write", &mut s.file_permissions.deny_write, true),
+        ("read", &mut settings.file_permissions.read, false),
+        ("write", &mut settings.file_permissions.write, false),
+        ("deny-read", &mut settings.file_permissions.deny_read, true),
+        (
+            "deny-write",
+            &mut settings.file_permissions.deny_write,
+            true,
+        ),
     ] {
         loop {
-            let chosen = prompt(input, output, name, &Some(value.clone()), false)?.unwrap();
+            let chosen =
+                prompt_permission_list(input, output, name, &Some(value.clone()), false)?.unwrap();
             let valid = if deny {
                 crate::access::match_patterns(&chosen).map(|_| ())
             } else {
                 chosen.iter().try_for_each(|p| {
-                    let path = crate::access::path(p, home, cwd)?;
+                    let path = crate::access::expand_path(p, home, cwd)?;
                     ensure!(path.exists(), "grant path must exist");
                     Ok(())
                 })
@@ -239,21 +251,21 @@ fn choose(
         }
     }
     loop {
-        s.http_permissions.allow_http = prompt(
+        settings.http_permissions.allow_http = prompt_permission_list(
             input,
             output,
             "allow-http",
-            &s.http_permissions.allow_http,
+            &settings.http_permissions.allow_http,
             true,
         )?;
-        s.http_permissions.deny_http = prompt(
+        settings.http_permissions.deny_http = prompt_permission_list(
             input,
             output,
             "deny-http",
-            &s.http_permissions.deny_http,
+            &settings.http_permissions.deny_http,
             true,
         )?;
-        match s.http_permissions.validate() {
+        match settings.http_permissions.validate() {
             Ok(()) => break,
             Err(e) => writeln!(
                 output,
@@ -261,8 +273,8 @@ fn choose(
             )?,
         }
     }
-    s.validate(home, cwd)?;
-    Ok(s)
+    settings.validate(home, cwd)?;
+    Ok(settings)
 }
 
 pub async fn register(
@@ -316,7 +328,7 @@ pub async fn register(
         "archive must be .tar or .zip"
     );
     extract(&archive, extension == "zip", temporary.path())?;
-    let meta = Tool::parse(&fs::read_to_string(temporary.path().join("tool.toml"))?)?;
+    let meta = ToolMetadata::parse(&fs::read_to_string(temporary.path().join("tool.toml"))?)?;
     let name = meta.name.clone();
     let tools = home.join("tools");
     let destination = tools.join(&name);
@@ -324,14 +336,15 @@ pub async fn register(
         !destination.try_exists()? || force,
         "tool {name} already exists; use --force (-f) to overwrite"
     );
-    runtime::Tool::load(&fs::read(temporary.path().join("tool.wasm"))?, meta)?;
-    let suggested = suggestions(&fs::read_to_string(temporary.path().join("defaults.toml"))?)?;
+    runtime::LoadedTool::load(&fs::read(temporary.path().join("tool.wasm"))?, meta)?;
+    let suggested =
+        parse_suggested_permissions(&fs::read_to_string(temporary.path().join("defaults.toml"))?)?;
     // Validate configuration before prompting or changing any installed state.
     let mut local = Configuration::read(&config::project_config(cwd))?;
     let mut effective = Configuration::effective(home, cwd)?;
-    let chosen = choose(suggested, home, cwd, input, output)?;
+    let chosen = review_suggested_permissions(suggested, home, cwd, input, output)?;
     effective.tools.insert(name.clone(), chosen.clone());
-    let mut installed = names(home)?;
+    let mut installed = registered_tool_names(home)?;
     if !installed.contains(&name) {
         installed.push(name.clone());
     }
@@ -341,7 +354,7 @@ pub async fn register(
     let stage = tempfile::tempdir_in(&tools)?;
     let staged_tool = stage.path().join("new");
     fs::create_dir(&staged_tool)?;
-    for file in FILES {
+    for file in REQUIRED_PACKAGE_FILES {
         fs::copy(temporary.path().join(file), staged_tool.join(file))?;
     }
     let backup = stage.path().join("old");
@@ -367,7 +380,7 @@ pub async fn register(
 }
 
 pub fn unregister(name: &str, home: &Path, cwd: &Path) -> Result<()> {
-    let dir = directory(home, name)?;
+    let dir = registered_tool_directory(home, name)?;
     let paths = [home.join("config.toml"), config::project_config(cwd)];
     let mut changes = vec![];
     for path in &paths {

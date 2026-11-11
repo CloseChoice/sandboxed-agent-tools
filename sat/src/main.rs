@@ -1,6 +1,6 @@
 use anyhow::{Result, ensure};
 use clap::Parser;
-// todo: this is not safe agent tools -> 
+// todo: this is not safe agent tools ->
 use sandboxed_agent_tools::{
     cli::{self, Action, Cli},
     config::{self, Configuration},
@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
             .await?
         }
         Action::List => {
-            for name in registry::names(&home)? {
+            for name in registry::registered_tool_names(&home)? {
                 println!("{name}");
             }
         }
@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
             let config = Configuration::effective(&home, &cwd)?;
             let name = config.resolve(&args[0]);
             let mut settings = config.tools.get(&name).cloned().unwrap_or_default();
-            let tool_args = cli::invocation(&args[1..], &mut settings)?;
+            let tool_args = cli::apply_permission_overrides(&args[1..], &mut settings)?;
             registry::load(&home, &name)?
                 .run(&tool_args, &settings, &home, &cwd)
                 .await?;

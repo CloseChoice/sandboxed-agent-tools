@@ -2,7 +2,7 @@
 
 use crate::{
     access::{self, Access},
-    runtime::State,
+    runtime::RuntimeState,
 };
 use anyhow::{Result, bail, ensure};
 use cap_std::fs::Dir;
@@ -16,15 +16,19 @@ use wasmtime::component::{Component, Linker, Type, types::ComponentItem};
 use wasmtime::{Engine, StoreContextMut};
 
 #[derive(Clone, Debug, serde::Serialize)]
-pub struct Capability {
+/// Operations requested by a named component import; these grant no authority.
+pub struct FilesystemImport {
     pub name: String,
     pub directory: bool,
     pub read: bool,
     pub write: bool,
 }
 
-pub fn discover(engine: &Engine, component: &Component) -> Result<Vec<Capability>> {
-    let mut caps = Vec::new();
+pub fn discover_filesystem_imports(
+    engine: &Engine,
+    component: &Component,
+) -> Result<Vec<FilesystemImport>> {
+    let mut filesystem_imports = Vec::new();
     for (name, item) in component.component_type().imports(engine) {
         if name.starts_with("wasi:") {
             continue;
@@ -34,14 +38,14 @@ pub fn discover(engine: &Engine, component: &Component) -> Result<Vec<Capability
         };
         let functions: Vec<_> = interface.exports(engine).collect();
         let directory = functions.iter().any(|(n, _)| *n == "list");
-        let cap = Capability {
+        let filesystem_import = FilesystemImport {
             name: name.into(),
             directory,
             read: functions.iter().any(|(n, _)| *n == "read"),
             write: functions.iter().any(|(n, _)| *n == "write"),
         };
         ensure!(
-            cap.read || cap.write,
+            filesystem_import.read || filesystem_import.write,
             "unsupported filesystem import {name}"
         );
         for (operation, item) in functions {
@@ -82,67 +86,72 @@ pub fn discover(engine: &Engine, component: &Component) -> Result<Vec<Capability
             };
             ensure!(ok, "invalid return type for {name}.{operation}");
         }
-        caps.push(cap);
+        filesystem_imports.push(filesystem_import);
     }
-    Ok(caps)
+    Ok(filesystem_imports)
 }
 
-pub struct Binding {
-    resource: Resource,
+/// An opened resource with permissions limited by host grants.
+pub struct FilesystemBinding {
+    resource: BoundFilesystemResource,
     read: bool,
     write: bool,
     path: PathBuf,
     access: Access,
 }
 
-enum Resource {
+enum BoundFilesystemResource {
     Directory(Dir),
     File(File),
 }
 
-pub fn open(
-    cap: &Capability,
-    text: &str,
+pub fn bind_filesystem_import(
+    filesystem_import: &FilesystemImport,
+    configured_path: &str,
     access: &Access,
     home: &Path,
     cwd: &Path,
-) -> Result<Binding> {
-    let path = access::path(text, home, cwd)?;
+) -> Result<FilesystemBinding> {
+    let path = access::expand_path(configured_path, home, cwd)?;
     let path = std::fs::canonicalize(path)?;
     // Binding a resource does not itself widen its granted authority.
-    let read = cap.read && access.authorize(&path, false).is_ok();
-    let write = cap.write && access.authorize(&path, true).is_ok();
-    ensure!(read || write, "no matching grant for binding {}", cap.name);
-    let root = access
-        .roots
+    let read = filesystem_import.read && access.authorize(&path, false).is_ok();
+    let write = filesystem_import.write && access.authorize(&path, true).is_ok();
+    ensure!(
+        read || write,
+        "no matching grant for binding {}",
+        filesystem_import.name
+    );
+    let grant = access
+        .grants
         .iter()
         .filter(|r| path == r.path || r.directory && path.starts_with(&r.path))
         .max_by_key(|r| r.path.components().count())
         .ok_or_else(|| anyhow::anyhow!("binding not granted"))?;
-    let resource = if root.directory {
-        let dir = Dir::open_ambient_dir(&root.path, cap_std::ambient_authority())?;
-        let rel = path
-            .strip_prefix(&root.path)?
+    let resource = if grant.directory {
+        let dir = Dir::open_ambient_dir(&grant.path, cap_std::ambient_authority())?;
+        let relative_path = path
+            .strip_prefix(&grant.path)?
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("non UTF-8 binding"))?;
-        let (parent, name) = access::secure_parent(&dir, rel)?;
-        if cap.directory {
+        let (parent, name) = access::open_parent_directory_without_symlinks(&dir, relative_path)?;
+        if filesystem_import.directory {
             use cap_fs_ext::DirExt;
-            Resource::Directory(parent.open_dir_nofollow(name)?)
+            BoundFilesystemResource::Directory(parent.open_dir_nofollow(name)?)
         } else {
-            Resource::File(access::open_file(&parent, &name, write, false)?)
+            BoundFilesystemResource::File(access::open_file(&parent, &name, write, false)?)
         }
     } else {
-        ensure!(!cap.directory, "binding requires directory");
+        ensure!(!filesystem_import.directory, "binding requires directory");
         // Explicit file grants pin the selected inode without exposing its parent.
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(write)
             .open(&path)?;
         access::check_file(&file)?;
-        Resource::File(file)
+        BoundFilesystemResource::File(file)
     };
-    Ok(Binding {
+    Ok(FilesystemBinding {
         resource,
         read,
         write,
@@ -151,13 +160,13 @@ pub fn open(
     })
 }
 
-fn safe_error<T>(r: std::io::Result<T>) -> Result<T, String> {
+fn hide_host_path_in_error<T>(r: std::io::Result<T>) -> Result<T, String> {
     // Do not disclose host paths in filesystem error messages.
     r.map_err(|e| format!("filesystem operation failed: {:?}", e.kind()))
 }
 
-impl Binding {
-    fn checked_path(&self, path: &str, write: bool) -> Result<PathBuf, String> {
+impl FilesystemBinding {
+    fn authorize_relative_path(&self, path: &str, write: bool) -> Result<PathBuf, String> {
         let path = Path::new(path);
         if path.components().any(|c| {
             !matches!(
@@ -178,9 +187,9 @@ impl Binding {
         if !self.read {
             return Err("read denied".into());
         }
-        self.checked_path(path, false)?;
+        self.authorize_relative_path(path, false)?;
         let mut read = |file: &mut File| {
-            safe_error((|| {
+            hide_host_path_in_error((|| {
                 access::check_file(file)?;
                 file.seek(SeekFrom::Start(0))?;
                 let mut text = String::new();
@@ -189,13 +198,13 @@ impl Binding {
             })())
         };
         match &mut self.resource {
-            Resource::Directory(dir) => {
-                let (parent, name) = safe_error(access::secure_parent(dir, path))?;
-                read(&mut safe_error(access::open_file(
+            BoundFilesystemResource::Directory(dir) => {
+                let (parent, name) = hide_host_path_in_error(access::open_parent_directory_without_symlinks(dir, path))?;
+                read(&mut hide_host_path_in_error(access::open_file(
                     &parent, &name, false, false,
                 ))?)
             }
-            Resource::File(file) => read(file),
+            BoundFilesystemResource::File(file) => read(file),
         }
     }
 
@@ -203,9 +212,9 @@ impl Binding {
         if !self.write {
             return Err("write denied".into());
         }
-        self.checked_path(path, true)?;
+        self.authorize_relative_path(path, true)?;
         let mut write = |file: &mut File| {
-            safe_error((|| {
+            hide_host_path_in_error((|| {
                 access::check_file(file)?;
                 file.seek(SeekFrom::Start(0))?;
                 file.set_len(0)?;
@@ -213,13 +222,13 @@ impl Binding {
             })())
         };
         match &mut self.resource {
-            Resource::Directory(dir) => {
-                let (parent, name) = safe_error(access::secure_parent(dir, path))?;
-                write(&mut safe_error(access::open_file(
+            BoundFilesystemResource::Directory(dir) => {
+                let (parent, name) = hide_host_path_in_error(access::open_parent_directory_without_symlinks(dir, path))?;
+                write(&mut hide_host_path_in_error(access::open_file(
                     &parent, &name, true, true,
                 ))?)
             }
-            Resource::File(file) => write(file),
+            BoundFilesystemResource::File(file) => write(file),
         }
     }
 
@@ -227,19 +236,19 @@ impl Binding {
         if !self.read {
             return Err("list denied".into());
         }
-        let host = self.checked_path(path, false)?;
-        let Resource::Directory(dir) = &self.resource else {
+        let host = self.authorize_relative_path(path, false)?;
+        let BoundFilesystemResource::Directory(dir) = &self.resource else {
             return Err("not a directory".into());
         };
         use cap_fs_ext::DirExt;
-        let (parent, name) = safe_error(access::secure_parent(dir, path))?;
-        let dir = safe_error(parent.open_dir_nofollow(name))?;
+        let (parent, name) = hide_host_path_in_error(access::open_parent_directory_without_symlinks(dir, path))?;
+        let dir = hide_host_path_in_error(parent.open_dir_nofollow(name))?;
         let mut names = vec![];
-        for entry in safe_error(dir.entries())? {
-            let entry = safe_error(entry)?;
+        for entry in hide_host_path_in_error(dir.entries())? {
+            let entry = hide_host_path_in_error(entry)?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if self.access.authorize(&host.join(&name), false).is_ok()
-                && !safe_error(entry.file_type())?.is_symlink()
+                && !hide_host_path_in_error(entry.file_type())?.is_symlink()
             {
                 names.push(name);
             }
@@ -249,30 +258,37 @@ impl Binding {
     }
 }
 
-pub fn link(linker: &mut Linker<State>, caps: &[Capability]) -> Result<()> {
-    for cap in caps {
-        let mut interface = linker.instance(&cap.name)?;
-        if cap.read {
-            let name = cap.name.clone();
-            if cap.directory {
+pub fn link_filesystem_imports(
+    linker: &mut Linker<RuntimeState>,
+    filesystem_imports: &[FilesystemImport],
+) -> Result<()> {
+    for filesystem_import in filesystem_imports {
+        let mut interface = linker.instance(&filesystem_import.name)?;
+        if filesystem_import.read {
+            let name = filesystem_import.name.clone();
+            if filesystem_import.directory {
                 interface.func_wrap(
                     "read",
-                    move |mut s: StoreContextMut<'_, State>, (path,): (String,)| {
+                    move |mut s: StoreContextMut<'_, RuntimeState>, (path,): (String,)| {
                         Ok((s.data_mut().files.get_mut(&name).unwrap().read(&path),))
                     },
                 )?;
             } else {
-                interface.func_wrap("read", move |mut s: StoreContextMut<'_, State>, (): ()| {
-                    Ok((s.data_mut().files.get_mut(&name).unwrap().read(""),))
-                })?;
+                interface.func_wrap(
+                    "read",
+                    move |mut s: StoreContextMut<'_, RuntimeState>, (): ()| {
+                        Ok((s.data_mut().files.get_mut(&name).unwrap().read(""),))
+                    },
+                )?;
             }
         }
-        if cap.write {
-            let name = cap.name.clone();
-            if cap.directory {
+        if filesystem_import.write {
+            let name = filesystem_import.name.clone();
+            if filesystem_import.directory {
                 interface.func_wrap(
                     "write",
-                    move |mut s: StoreContextMut<'_, State>, (path, text): (String, String)| {
+                    move |mut s: StoreContextMut<'_, RuntimeState>,
+                          (path, text): (String, String)| {
                         Ok((s
                             .data_mut()
                             .files
@@ -284,17 +300,17 @@ pub fn link(linker: &mut Linker<State>, caps: &[Capability]) -> Result<()> {
             } else {
                 interface.func_wrap(
                     "write",
-                    move |mut s: StoreContextMut<'_, State>, (text,): (String,)| {
+                    move |mut s: StoreContextMut<'_, RuntimeState>, (text,): (String,)| {
                         Ok((s.data_mut().files.get_mut(&name).unwrap().write("", &text),))
                     },
                 )?;
             }
         }
-        if cap.directory {
-            let name = cap.name.clone();
+        if filesystem_import.directory {
+            let name = filesystem_import.name.clone();
             interface.func_wrap(
                 "list",
-                move |s: StoreContextMut<'_, State>, (path,): (String,)| {
+                move |s: StoreContextMut<'_, RuntimeState>, (path,): (String,)| {
                     Ok((s.data().files[&name].list(&path),))
                 },
             )?;
@@ -303,4 +319,4 @@ pub fn link(linker: &mut Linker<State>, caps: &[Capability]) -> Result<()> {
     Ok(())
 }
 
-pub type Bindings = BTreeMap<String, Binding>;
+pub type FilesystemBindings = BTreeMap<String, FilesystemBinding>;

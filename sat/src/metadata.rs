@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct Tool {
+pub struct ToolMetadata {
     pub name: String,
     pub version: String,
     pub description: String,
@@ -57,7 +57,7 @@ pub fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 
-impl Tool {
+impl ToolMetadata {
     pub fn parse(text: &str) -> Result<Self> {
         let tool: Self = toml::from_str(text)?;
         ensure!(

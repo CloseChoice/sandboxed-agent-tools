@@ -3,7 +3,7 @@
 //! synthetic mount point: only opening/statting `.` is allowed, and yields an
 //! already-open file. Its parent directory is never handed to the guest.
 
-use crate::{access::Access, runtime::State};
+use crate::{access::Access, runtime::RuntimeState};
 use anyhow::{Context, Result, ensure};
 use std::path::Path;
 use wasmtime::component::{HasData, Linker, Resource};
@@ -17,34 +17,37 @@ use wasmtime_wasi::{
     filesystem::{File, FsPerms, OpenMode, WasiFilesystemCtxView},
 };
 
-pub fn configure(wasi: &mut WasiCtxBuilder, access: &Access) -> Result<Vec<(File, String)>> {
+pub fn configure_preopens(
+    wasi: &mut WasiCtxBuilder,
+    access: &Access,
+) -> Result<Vec<(File, String)>> {
     let mut files = vec![];
-    for root in &access.roots {
-        let perms = if root.write {
+    for grant in &access.grants {
+        let perms = if grant.write {
             FsPerms::ReadWrite
         } else {
             FsPerms::ReadOnly
         };
-        let mode = if root.write {
+        let mode = if grant.write {
             OpenMode::READ | OpenMode::WRITE
         } else {
             OpenMode::READ
         };
-        if root.directory {
-            wasi.preopened_dir(&root.path, &root.guest, perms)?;
+        if grant.directory {
+            wasi.preopened_dir(&grant.path, &grant.guest, perms)?;
         } else {
             let file = std::fs::OpenOptions::new()
                 .read(true)
-                .write(root.write)
-                .open(&root.path)?;
+                .write(grant.write)
+                .open(&grant.path)?;
             crate::access::check_file(&file)?;
-            files.push((File::new(file, perms, mode, false), root.guest.clone()));
+            files.push((File::new(file, perms, mode, false), grant.guest.clone()));
         }
     }
     Ok(files)
 }
 
-fn normalize(path: &str) -> Result<String> {
+fn normalize_guest_path(path: &str) -> Result<String> {
     let mut parts = Vec::new();
     for part in path.split('/') {
         match part {
@@ -75,42 +78,42 @@ fn directory_stat() -> types::DescriptorStat {
     }
 }
 
-struct GrantView;
+struct FilesystemHostView;
 
-impl HasData for GrantView {
-    type Data<'a> = &'a mut State;
+impl HasData for FilesystemHostView {
+    type Data<'a> = &'a mut RuntimeState;
 }
 
-pub fn link(linker: &mut Linker<State>) -> Result<()> {
+pub fn link_filesystem_permissions(linker: &mut Linker<RuntimeState>) -> Result<()> {
     linker.allow_shadowing(true);
-    types::add_to_linker::<State, GrantView>(linker, |s| s)?;
-    preopens::add_to_linker::<State, GrantView>(linker, |s| s)?;
+    types::add_to_linker::<RuntimeState, FilesystemHostView>(linker, |s| s)?;
+    preopens::add_to_linker::<RuntimeState, FilesystemHostView>(linker, |s| s)?;
     linker.allow_shadowing(false);
     Ok(())
 }
 
-impl State {
-    fn fs(&mut self) -> WasiFilesystemCtxView<'_> {
+impl RuntimeState {
+    fn wasi_filesystem_view(&mut self) -> WasiFilesystemCtxView<'_> {
         WasiFilesystemCtxView {
             ctx: self.wasi.filesystem(),
             table: &mut self.table,
         }
     }
 
-    fn virtual_mount(&self, fd: &Resource<types::Descriptor>) -> bool {
+    fn is_virtual_mount(&self, fd: &Resource<types::Descriptor>) -> bool {
         self.table
             .get(&Resource::<Mount>::new_borrow(fd.rep()))
             .is_ok()
     }
 
-    fn cwd_mount(&self, fd: &Resource<types::Descriptor>) -> bool {
+    fn is_working_directory_mount(&self, fd: &Resource<types::Descriptor>) -> bool {
         matches!(
             self.table.get(&Resource::<Mount>::new_borrow(fd.rep())),
             Ok(Mount::WorkingDirectory)
         )
     }
 
-    fn single(&self, fd: &Resource<types::Descriptor>) -> Option<File> {
+    fn mounted_file(&self, fd: &Resource<types::Descriptor>) -> Option<File> {
         self.table
             .get(&Resource::<Mount>::new_borrow(fd.rep()))
             .ok()
@@ -120,8 +123,8 @@ impl State {
             })
     }
 
-    fn native(&self, fd: &Resource<types::Descriptor>) -> FsResult<()> {
-        if self.virtual_mount(fd) {
+    fn require_native_descriptor(&self, fd: &Resource<types::Descriptor>) -> FsResult<()> {
+        if self.is_virtual_mount(fd) {
             return Err(ErrorCode::NotPermitted.into());
         }
         if let Ok(types::Descriptor::File(file)) = self.table.get(fd) {
@@ -130,7 +133,7 @@ impl State {
         Ok(())
     }
 
-    fn single_path(path: &str) -> FsResult<()> {
+    fn require_mount_self_path(path: &str) -> FsResult<()> {
         if path != "." && !path.is_empty() {
             return Err(ErrorCode::NotPermitted.into());
         }
@@ -138,10 +141,10 @@ impl State {
     }
 }
 
-impl preopens::Host for State {
+impl preopens::Host for RuntimeState {
     fn get_directories(&mut self) -> wasmtime::Result<Vec<(Resource<types::Descriptor>, String)>> {
-        let mut dirs = preopens::Host::get_directories(&mut self.fs())?;
-        for (file, path) in &self.single_files {
+        let mut dirs = preopens::Host::get_directories(&mut self.wasi_filesystem_view())?;
+        for (file, path) in &self.single_file_preopens {
             let r = self.table.push(Mount::File(file.clone()))?;
             dirs.push((Resource::new_own(r.rep()), path.clone()));
         }
@@ -149,21 +152,21 @@ impl preopens::Host for State {
             let r = self.table.push(Mount::WorkingDirectory)?;
             dirs.push((Resource::new_own(r.rep()), path.clone()));
         }
-        self.grant_roots.clear();
+        self.granted_descriptors.clear();
         for (fd, path) in &dirs {
             self.descriptor_paths.insert(fd.rep(), path.clone());
             let mount = if let Ok(m) = self.table.get(&Resource::<Mount>::new_borrow(fd.rep())) {
-                GrantRoot::Virtual(m.clone())
+                GrantedDescriptor::Virtual(m.clone())
             } else {
-                GrantRoot::Native(self.table.get(fd)?.clone())
+                GrantedDescriptor::Native(self.table.get(fd)?.clone())
             };
-            self.grant_roots.push((path.clone(), mount));
+            self.granted_descriptors.push((path.clone(), mount));
         }
         Ok(dirs)
     }
 }
 
-impl types::Host for State {
+impl types::Host for RuntimeState {
     fn convert_error_code(&mut self, err: FsError) -> wasmtime::Result<ErrorCode> {
         err.downcast()
     }
@@ -172,11 +175,11 @@ impl types::Host for State {
         &mut self,
         err: Resource<wasmtime::Error>,
     ) -> wasmtime::Result<Option<ErrorCode>> {
-        types::Host::filesystem_error_code(&mut self.fs(), err)
+        types::Host::filesystem_error_code(&mut self.wasi_filesystem_view(), err)
     }
 }
 
-impl HostDescriptor for State {
+impl HostDescriptor for RuntimeState {
     async fn advise(
         &mut self,
         fd: Resource<types::Descriptor>,
@@ -184,35 +187,35 @@ impl HostDescriptor for State {
         len: types::Filesize,
         advice: types::Advice,
     ) -> FsResult<()> {
-        self.native(&fd)?;
-        HostDescriptor::advise(&mut self.fs(), fd, offset, len, advice).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::advise(&mut self.wasi_filesystem_view(), fd, offset, len, advice).await
     }
 
     async fn sync_data(&mut self, fd: Resource<types::Descriptor>) -> FsResult<()> {
-        self.native(&fd)?;
-        HostDescriptor::sync_data(&mut self.fs(), fd).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::sync_data(&mut self.wasi_filesystem_view(), fd).await
     }
 
     async fn get_flags(
         &mut self,
         fd: Resource<types::Descriptor>,
     ) -> FsResult<types::DescriptorFlags> {
-        if self.virtual_mount(&fd) {
+        if self.is_virtual_mount(&fd) {
             return Ok(types::DescriptorFlags::READ);
         }
-        self.native(&fd)?;
-        HostDescriptor::get_flags(&mut self.fs(), fd).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::get_flags(&mut self.wasi_filesystem_view(), fd).await
     }
 
     async fn get_type(
         &mut self,
         fd: Resource<types::Descriptor>,
     ) -> FsResult<types::DescriptorType> {
-        if self.virtual_mount(&fd) {
+        if self.is_virtual_mount(&fd) {
             return Ok(types::DescriptorType::Directory);
         }
-        self.native(&fd)?;
-        HostDescriptor::get_type(&mut self.fs(), fd).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::get_type(&mut self.wasi_filesystem_view(), fd).await
     }
 
     async fn set_size(
@@ -220,9 +223,9 @@ impl HostDescriptor for State {
         fd: Resource<types::Descriptor>,
         size: types::Filesize,
     ) -> FsResult<()> {
-        self.check_fd(&fd, true)?;
-        self.native(&fd)?;
-        HostDescriptor::set_size(&mut self.fs(), fd, size).await
+        self.authorize_descriptor(&fd, true)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::set_size(&mut self.wasi_filesystem_view(), fd, size).await
     }
 
     async fn set_times(
@@ -231,9 +234,9 @@ impl HostDescriptor for State {
         atim: types::NewTimestamp,
         mtim: types::NewTimestamp,
     ) -> FsResult<()> {
-        self.check_fd(&fd, true)?;
-        self.native(&fd)?;
-        HostDescriptor::set_times(&mut self.fs(), fd, atim, mtim).await
+        self.authorize_descriptor(&fd, true)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::set_times(&mut self.wasi_filesystem_view(), fd, atim, mtim).await
     }
 
     async fn read(
@@ -242,9 +245,9 @@ impl HostDescriptor for State {
         len: types::Filesize,
         offset: types::Filesize,
     ) -> FsResult<(Vec<u8>, bool)> {
-        self.check_fd(&fd, false)?;
-        self.native(&fd)?;
-        HostDescriptor::read(&mut self.fs(), fd, len, offset).await
+        self.authorize_descriptor(&fd, false)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::read(&mut self.wasi_filesystem_view(), fd, len, offset).await
     }
 
     async fn write(
@@ -253,30 +256,30 @@ impl HostDescriptor for State {
         buf: Vec<u8>,
         offset: types::Filesize,
     ) -> FsResult<types::Filesize> {
-        self.check_fd(&fd, true)?;
-        self.native(&fd)?;
-        HostDescriptor::write(&mut self.fs(), fd, buf, offset).await
+        self.authorize_descriptor(&fd, true)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::write(&mut self.wasi_filesystem_view(), fd, buf, offset).await
     }
 
     async fn read_directory(
         &mut self,
         fd: Resource<types::Descriptor>,
     ) -> FsResult<Resource<types::DirectoryEntryStream>> {
-        self.native(&fd)?;
-        self.check_fd(&fd, false)?;
+        self.require_native_descriptor(&fd)?;
+        self.authorize_descriptor(&fd, false)?;
         let path = self
             .descriptor_paths
             .get(&fd.rep())
             .cloned()
             .ok_or(ErrorCode::NotPermitted)?;
-        let stream = HostDescriptor::read_directory(&mut self.fs(), fd).await?;
-        self.stream_paths.insert(stream.rep(), path);
+        let stream = HostDescriptor::read_directory(&mut self.wasi_filesystem_view(), fd).await?;
+        self.directory_stream_paths.insert(stream.rep(), path);
         Ok(stream)
     }
 
     async fn sync(&mut self, fd: Resource<types::Descriptor>) -> FsResult<()> {
-        self.native(&fd)?;
-        HostDescriptor::sync(&mut self.fs(), fd).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::sync(&mut self.wasi_filesystem_view(), fd).await
     }
 
     async fn create_directory_at(
@@ -284,24 +287,25 @@ impl HostDescriptor for State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<()> {
-        self.check_at(&fd, &path, true)?;
-        let plan0 = self.resolve(&fd, &path)?;
-        let (fd, path, temp0, guest0) = self.materialize(fd, path, plan0)?;
+        self.authorize_relative_guest_path(&fd, &path, true)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self.create_directory_at_resolved(fd, path).await;
-        if let Some(rep) = temp0 {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
-        let _ = guest0;
+        let _ = guest_path;
         result
     }
 
     async fn stat(&mut self, fd: Resource<types::Descriptor>) -> FsResult<types::DescriptorStat> {
-        if self.virtual_mount(&fd) {
+        if self.is_virtual_mount(&fd) {
             return Ok(directory_stat());
         }
-        self.check_fd(&fd, false)?;
-        self.native(&fd)?;
-        HostDescriptor::stat(&mut self.fs(), fd).await
+        self.authorize_descriptor(&fd, false)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::stat(&mut self.wasi_filesystem_view(), fd).await
     }
 
     async fn stat_at(
@@ -310,16 +314,17 @@ impl HostDescriptor for State {
         path_flags: types::PathFlags,
         path: String,
     ) -> FsResult<types::DescriptorStat> {
-        self.check_at(&fd, &path, false)?;
-        let plan0 = self.resolve(&fd, &path)?;
-        let (fd, path, temp0, guest0) = self.materialize(fd, path, plan0)?;
+        self.authorize_relative_guest_path(&fd, &path, false)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self
             .stat_at_resolved(fd, types::PathFlags::empty(), path)
             .await;
-        if let Some(rep) = temp0 {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
-        let _ = guest0;
+        let _ = guest_path;
         result
     }
 
@@ -331,16 +336,17 @@ impl HostDescriptor for State {
         atim: types::NewTimestamp,
         mtim: types::NewTimestamp,
     ) -> FsResult<()> {
-        self.check_at(&fd, &path, true)?;
-        let plan0 = self.resolve(&fd, &path)?;
-        let (fd, path, temp0, guest0) = self.materialize(fd, path, plan0)?;
+        self.authorize_relative_guest_path(&fd, &path, true)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self
             .set_times_at_resolved(fd, types::PathFlags::empty(), path, atim, mtim)
             .await;
-        if let Some(rep) = temp0 {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
-        let _ = guest0;
+        let _ = guest_path;
         result
     }
 
@@ -367,13 +373,14 @@ impl HostDescriptor for State {
             .intersects(types::DescriptorFlags::WRITE | types::DescriptorFlags::MUTATE_DIRECTORY)
             || oflags.intersects(types::OpenFlags::CREATE | types::OpenFlags::TRUNCATE);
         if flags.contains(types::DescriptorFlags::READ) || !write {
-            self.check_at(&fd, &path, false)?;
+            self.authorize_relative_guest_path(&fd, &path, false)?;
         }
         if write {
-            self.check_at(&fd, &path, true)?;
+            self.authorize_relative_guest_path(&fd, &path, true)?;
         }
-        let plan = self.resolve(&fd, &path)?;
-        let (fd, path, temp, guest) = self.materialize(fd, path, plan)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self
             .open_at_resolved(
                 fd,
@@ -383,12 +390,12 @@ impl HostDescriptor for State {
                 flags,
             )
             .await;
-        if let Some(rep) = temp {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
         if let Ok(opened) = &result {
-            if let Some(guest) = guest {
-                self.descriptor_paths.insert(opened.rep(), guest);
+            if let Some(guest_path) = guest_path {
+                self.descriptor_paths.insert(opened.rep(), guest_path);
             }
             if let Ok(types::Descriptor::File(file)) = self.table.get(opened) {
                 crate::access::check_file(&file.file).map_err(|_| ErrorCode::NotPermitted)?;
@@ -402,12 +409,12 @@ impl HostDescriptor for State {
 
     fn drop(&mut self, fd: Resource<types::Descriptor>) -> wasmtime::Result<()> {
         self.descriptor_paths.remove(&fd.rep());
-        if self.virtual_mount(&fd) {
+        if self.is_virtual_mount(&fd) {
             self.table.delete(Resource::<Mount>::new_own(fd.rep()))?;
             return Ok(());
         }
-        self.native(&fd)?;
-        HostDescriptor::drop(&mut self.fs(), fd)
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::drop(&mut self.wasi_filesystem_view(), fd)
     }
 
     async fn readlink_at(
@@ -415,14 +422,15 @@ impl HostDescriptor for State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<String> {
-        self.check_at(&fd, &path, false)?;
-        let plan0 = self.resolve(&fd, &path)?;
-        let (fd, path, temp0, guest0) = self.materialize(fd, path, plan0)?;
+        self.authorize_relative_guest_path(&fd, &path, false)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self.readlink_at_resolved(fd, path).await;
-        if let Some(rep) = temp0 {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
-        let _ = guest0;
+        let _ = guest_path;
         result
     }
 
@@ -431,14 +439,15 @@ impl HostDescriptor for State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<()> {
-        self.check_at(&fd, &path, true)?;
-        let plan0 = self.resolve(&fd, &path)?;
-        let (fd, path, temp0, guest0) = self.materialize(fd, path, plan0)?;
+        self.authorize_relative_guest_path(&fd, &path, true)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self.remove_directory_at_resolved(fd, path).await;
-        if let Some(rep) = temp0 {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
-        let _ = guest0;
+        let _ = guest_path;
         result
     }
 
@@ -466,14 +475,15 @@ impl HostDescriptor for State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<()> {
-        self.check_at(&fd, &path, true)?;
-        let plan0 = self.resolve(&fd, &path)?;
-        let (fd, path, temp0, guest0) = self.materialize(fd, path, plan0)?;
+        self.authorize_relative_guest_path(&fd, &path, true)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self.unlink_file_at_resolved(fd, path).await;
-        if let Some(rep) = temp0 {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
-        let _ = guest0;
+        let _ = guest_path;
         result
     }
 
@@ -482,9 +492,9 @@ impl HostDescriptor for State {
         fd: Resource<types::Descriptor>,
         offset: types::Filesize,
     ) -> FsResult<Resource<DynInputStream>> {
-        self.check_fd(&fd, false)?;
-        self.native(&fd)?;
-        HostDescriptor::read_via_stream(&mut self.fs(), fd, offset)
+        self.authorize_descriptor(&fd, false)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::read_via_stream(&mut self.wasi_filesystem_view(), fd, offset)
     }
 
     fn write_via_stream(
@@ -492,18 +502,18 @@ impl HostDescriptor for State {
         fd: Resource<types::Descriptor>,
         offset: types::Filesize,
     ) -> FsResult<Resource<DynOutputStream>> {
-        self.check_fd(&fd, true)?;
-        self.native(&fd)?;
-        HostDescriptor::write_via_stream(&mut self.fs(), fd, offset)
+        self.authorize_descriptor(&fd, true)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::write_via_stream(&mut self.wasi_filesystem_view(), fd, offset)
     }
 
     fn append_via_stream(
         &mut self,
         fd: Resource<types::Descriptor>,
     ) -> FsResult<Resource<DynOutputStream>> {
-        self.check_fd(&fd, true)?;
-        self.native(&fd)?;
-        HostDescriptor::append_via_stream(&mut self.fs(), fd)
+        self.authorize_descriptor(&fd, true)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::append_via_stream(&mut self.wasi_filesystem_view(), fd)
     }
 
     async fn is_same_object(
@@ -511,27 +521,27 @@ impl HostDescriptor for State {
         a: Resource<types::Descriptor>,
         b: Resource<types::Descriptor>,
     ) -> wasmtime::Result<bool> {
-        if self.virtual_mount(&a) || self.virtual_mount(&b) {
+        if self.is_virtual_mount(&a) || self.is_virtual_mount(&b) {
             return Ok(a.rep() == b.rep());
         }
-        self.native(&a)?;
-        self.native(&b)?;
-        HostDescriptor::is_same_object(&mut self.fs(), a, b).await
+        self.require_native_descriptor(&a)?;
+        self.require_native_descriptor(&b)?;
+        HostDescriptor::is_same_object(&mut self.wasi_filesystem_view(), a, b).await
     }
 
     async fn metadata_hash(
         &mut self,
         fd: Resource<types::Descriptor>,
     ) -> FsResult<types::MetadataHashValue> {
-        if self.virtual_mount(&fd) {
+        if self.is_virtual_mount(&fd) {
             return Ok(types::MetadataHashValue {
                 lower: fd.rep() as u64,
                 upper: 0,
             });
         }
-        self.check_fd(&fd, false)?;
-        self.native(&fd)?;
-        HostDescriptor::metadata_hash(&mut self.fs(), fd).await
+        self.authorize_descriptor(&fd, false)?;
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::metadata_hash(&mut self.wasi_filesystem_view(), fd).await
     }
 
     async fn metadata_hash_at(
@@ -540,42 +550,43 @@ impl HostDescriptor for State {
         path_flags: types::PathFlags,
         path: String,
     ) -> FsResult<types::MetadataHashValue> {
-        self.check_at(&fd, &path, false)?;
-        let plan0 = self.resolve(&fd, &path)?;
-        let (fd, path, temp0, guest0) = self.materialize(fd, path, plan0)?;
+        self.authorize_relative_guest_path(&fd, &path, false)?;
+        let resolved_path = self.resolve_guest_path(&fd, &path)?;
+        let (fd, path, temporary_descriptor_id, guest_path) =
+            self.open_resolved_descriptor(fd, path, resolved_path)?;
         let result = self
             .metadata_hash_at_resolved(fd, types::PathFlags::empty(), path)
             .await;
-        if let Some(rep) = temp0 {
+        if let Some(rep) = temporary_descriptor_id {
             HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
         }
-        let _ = guest0;
+        let _ = guest_path;
         result
     }
 }
 
-impl HostDirectoryEntryStream for State {
+impl HostDirectoryEntryStream for RuntimeState {
     async fn read_directory_entry(
         &mut self,
         stream: Resource<types::DirectoryEntryStream>,
     ) -> FsResult<Option<types::DirectoryEntry>> {
         let base = self
-            .stream_paths
+            .directory_stream_paths
             .get(&stream.rep())
             .cloned()
             .ok_or(ErrorCode::NotPermitted)?;
         loop {
             let entry = HostDirectoryEntryStream::read_directory_entry(
-                &mut self.fs(),
+                &mut self.wasi_filesystem_view(),
                 Resource::new_borrow(stream.rep()),
             )
             .await?;
             let Some(entry) = entry else {
                 return Ok(None);
             };
-            let guest = format!("{}/{}", base.trim_end_matches('/'), entry.name);
+            let guest_path = format!("{}/{}", base.trim_end_matches('/'), entry.name);
             if entry.type_ != types::DescriptorType::SymbolicLink
-                && self.guest_authorize(&guest, false).is_ok()
+                && self.authorize_guest_path(&guest_path, false).is_ok()
             {
                 return Ok(Some(entry));
             }
@@ -583,12 +594,12 @@ impl HostDirectoryEntryStream for State {
     }
 
     fn drop(&mut self, stream: Resource<types::DirectoryEntryStream>) -> wasmtime::Result<()> {
-        self.stream_paths.remove(&stream.rep());
-        HostDirectoryEntryStream::drop(&mut self.fs(), stream)
+        self.directory_stream_paths.remove(&stream.rep());
+        HostDirectoryEntryStream::drop(&mut self.wasi_filesystem_view(), stream)
     }
 }
 
-impl State {
+impl RuntimeState {
     async fn open_at_resolved(
         &mut self,
         fd: Resource<types::Descriptor>,
@@ -597,8 +608,8 @@ impl State {
         oflags: types::OpenFlags,
         flags: types::DescriptorFlags,
     ) -> FsResult<Resource<types::Descriptor>> {
-        if self.cwd_mount(&fd) {
-            Self::single_path(&path)?;
+        if self.is_working_directory_mount(&fd) {
+            Self::require_mount_self_path(&path)?;
             if oflags.intersects(types::OpenFlags::CREATE | types::OpenFlags::TRUNCATE)
                 || flags.intersects(
                     types::DescriptorFlags::WRITE | types::DescriptorFlags::MUTATE_DIRECTORY,
@@ -610,8 +621,8 @@ impl State {
                 self.table.push(Mount::WorkingDirectory)?.rep(),
             ));
         }
-        if let Some(mut file) = self.single(&fd) {
-            Self::single_path(&path)?;
+        if let Some(mut file) = self.mounted_file(&fd) {
+            Self::require_mount_self_path(&path)?;
             if oflags.contains(types::OpenFlags::DIRECTORY) {
                 return Err(ErrorCode::NotDirectory.into());
             }
@@ -640,8 +651,16 @@ impl State {
             };
             return Ok(self.table.push(types::Descriptor::File(file))?);
         }
-        self.native(&fd)?;
-        HostDescriptor::open_at(&mut self.fs(), fd, path_flags, path, oflags, flags).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::open_at(
+            &mut self.wasi_filesystem_view(),
+            fd,
+            path_flags,
+            path,
+            oflags,
+            flags,
+        )
+        .await
     }
 
     async fn stat_at_resolved(
@@ -650,20 +669,23 @@ impl State {
         path_flags: types::PathFlags,
         path: String,
     ) -> FsResult<types::DescriptorStat> {
-        if self.cwd_mount(&fd) {
-            Self::single_path(&path)?;
+        if self.is_working_directory_mount(&fd) {
+            Self::require_mount_self_path(&path)?;
             return Ok(directory_stat());
         }
-        if let Some(file) = self.single(&fd) {
-            Self::single_path(&path)?;
-            let native = self.table.push(types::Descriptor::File(file))?;
-            let result =
-                HostDescriptor::stat(&mut self.fs(), Resource::new_borrow(native.rep())).await;
-            self.table.delete(native)?;
+        if let Some(file) = self.mounted_file(&fd) {
+            Self::require_mount_self_path(&path)?;
+            let require_native_descriptor = self.table.push(types::Descriptor::File(file))?;
+            let result = HostDescriptor::stat(
+                &mut self.wasi_filesystem_view(),
+                Resource::new_borrow(require_native_descriptor.rep()),
+            )
+            .await;
+            self.table.delete(require_native_descriptor)?;
             return result;
         }
-        self.native(&fd)?;
-        HostDescriptor::stat_at(&mut self.fs(), fd, path_flags, path).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::stat_at(&mut self.wasi_filesystem_view(), fd, path_flags, path).await
     }
 
     async fn metadata_hash_at_resolved(
@@ -672,24 +694,27 @@ impl State {
         path_flags: types::PathFlags,
         path: String,
     ) -> FsResult<types::MetadataHashValue> {
-        if self.cwd_mount(&fd) {
-            Self::single_path(&path)?;
+        if self.is_working_directory_mount(&fd) {
+            Self::require_mount_self_path(&path)?;
             return Ok(types::MetadataHashValue {
                 lower: fd.rep() as u64,
                 upper: 0,
             });
         }
-        if let Some(file) = self.single(&fd) {
-            Self::single_path(&path)?;
-            let native = self.table.push(types::Descriptor::File(file))?;
-            let result =
-                HostDescriptor::metadata_hash(&mut self.fs(), Resource::new_borrow(native.rep()))
-                    .await;
-            self.table.delete(native)?;
+        if let Some(file) = self.mounted_file(&fd) {
+            Self::require_mount_self_path(&path)?;
+            let require_native_descriptor = self.table.push(types::Descriptor::File(file))?;
+            let result = HostDescriptor::metadata_hash(
+                &mut self.wasi_filesystem_view(),
+                Resource::new_borrow(require_native_descriptor.rep()),
+            )
+            .await;
+            self.table.delete(require_native_descriptor)?;
             return result;
         }
-        self.native(&fd)?;
-        HostDescriptor::metadata_hash_at(&mut self.fs(), fd, path_flags, path).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::metadata_hash_at(&mut self.wasi_filesystem_view(), fd, path_flags, path)
+            .await
     }
 
     async fn create_directory_at_resolved(
@@ -697,8 +722,8 @@ impl State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<()> {
-        self.native(&fd)?;
-        HostDescriptor::create_directory_at(&mut self.fs(), fd, path).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::create_directory_at(&mut self.wasi_filesystem_view(), fd, path).await
     }
 
     async fn set_times_at_resolved(
@@ -709,9 +734,9 @@ impl State {
         atim: types::NewTimestamp,
         mtim: types::NewTimestamp,
     ) -> FsResult<()> {
-        self.native(&fd)?;
+        self.require_native_descriptor(&fd)?;
         HostDescriptor::set_times_at(
-            &mut self.fs(),
+            &mut self.wasi_filesystem_view(),
             fd,
             types::PathFlags::empty(),
             path,
@@ -729,10 +754,10 @@ impl State {
         new_descriptor: Resource<types::Descriptor>,
         new_path: String,
     ) -> FsResult<()> {
-        self.native(&fd)?;
-        self.native(&new_descriptor)?;
+        self.require_native_descriptor(&fd)?;
+        self.require_native_descriptor(&new_descriptor)?;
         HostDescriptor::link_at(
-            &mut self.fs(),
+            &mut self.wasi_filesystem_view(),
             fd,
             old_path_flags,
             old_path,
@@ -747,8 +772,8 @@ impl State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<String> {
-        self.native(&fd)?;
-        HostDescriptor::readlink_at(&mut self.fs(), fd, path).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::readlink_at(&mut self.wasi_filesystem_view(), fd, path).await
     }
 
     async fn remove_directory_at_resolved(
@@ -756,8 +781,8 @@ impl State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<()> {
-        self.native(&fd)?;
-        HostDescriptor::remove_directory_at(&mut self.fs(), fd, path).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::remove_directory_at(&mut self.wasi_filesystem_view(), fd, path).await
     }
 
     async fn rename_at_resolved(
@@ -767,9 +792,16 @@ impl State {
         new_fd: Resource<types::Descriptor>,
         new_path: String,
     ) -> FsResult<()> {
-        self.native(&fd)?;
-        self.native(&new_fd)?;
-        HostDescriptor::rename_at(&mut self.fs(), fd, old_path, new_fd, new_path).await
+        self.require_native_descriptor(&fd)?;
+        self.require_native_descriptor(&new_fd)?;
+        HostDescriptor::rename_at(
+            &mut self.wasi_filesystem_view(),
+            fd,
+            old_path,
+            new_fd,
+            new_path,
+        )
+        .await
     }
 
     async fn symlink_at_resolved(
@@ -778,8 +810,8 @@ impl State {
         src_path: String,
         dest_path: String,
     ) -> FsResult<()> {
-        self.native(&fd)?;
-        HostDescriptor::symlink_at(&mut self.fs(), fd, src_path, dest_path).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::symlink_at(&mut self.wasi_filesystem_view(), fd, src_path, dest_path).await
     }
 
     async fn unlink_file_at_resolved(
@@ -787,45 +819,50 @@ impl State {
         fd: Resource<types::Descriptor>,
         path: String,
     ) -> FsResult<()> {
-        self.native(&fd)?;
-        HostDescriptor::unlink_file_at(&mut self.fs(), fd, path).await
+        self.require_native_descriptor(&fd)?;
+        HostDescriptor::unlink_file_at(&mut self.wasi_filesystem_view(), fd, path).await
     }
 }
 
-// A snapshot of the granted roots, independent of guest descriptor lifetimes.
-// Routing `..` can switch roots, but can never manufacture a new host grant.
+// Retain granted descriptors even after the guest closes its copies.
+// Routing `..` can switch grants, but can never manufacture a new host grant.
 #[derive(Clone)]
-pub(crate) enum GrantRoot {
+pub(crate) enum GrantedDescriptor {
     Native(types::Descriptor),
     Virtual(Mount),
 }
 
-struct Resolved {
-    root: GrantRoot,
-    relative: String,
-    absolute: String,
+struct ResolvedGuestPath {
+    descriptor: GrantedDescriptor,
+    relative_path: String,
+    guest_path: String,
 }
 
-impl State {
-    fn guest_authorize(&self, guest: &str, write: bool) -> FsResult<()> {
+impl RuntimeState {
+    fn authorize_guest_path(&self, guest_path: &str, write: bool) -> FsResult<()> {
         let host = self
             .access
-            .host_for_guest(guest)
+            .resolve_guest_path_to_host_path(guest_path)
             .ok_or(ErrorCode::NotPermitted)?;
         self.access
             .authorize(&host, write)
             .map_err(|_| ErrorCode::NotPermitted.into())
     }
 
-    fn check_fd(&self, fd: &Resource<types::Descriptor>, write: bool) -> FsResult<()> {
-        let guest = self
+    fn authorize_descriptor(&self, fd: &Resource<types::Descriptor>, write: bool) -> FsResult<()> {
+        let guest_path = self
             .descriptor_paths
             .get(&fd.rep())
             .ok_or(ErrorCode::NotPermitted)?;
-        self.guest_authorize(guest, write)
+        self.authorize_guest_path(guest_path, write)
     }
 
-    fn check_at(&self, fd: &Resource<types::Descriptor>, path: &str, write: bool) -> FsResult<()> {
+    fn authorize_relative_guest_path(
+        &self,
+        fd: &Resource<types::Descriptor>,
+        path: &str,
+        write: bool,
+    ) -> FsResult<()> {
         let base = self
             .descriptor_paths
             .get(&fd.rep())
@@ -833,11 +870,16 @@ impl State {
         if path.starts_with('/') || path.contains('\\') {
             return Err(ErrorCode::NotPermitted.into());
         }
-        let absolute = normalize(&format!("{base}/{path}")).map_err(|_| ErrorCode::NotPermitted)?;
-        self.guest_authorize(&absolute, write)
+        let guest_path =
+            normalize_guest_path(&format!("{base}/{path}")).map_err(|_| ErrorCode::NotPermitted)?;
+        self.authorize_guest_path(&guest_path, write)
     }
 
-    fn resolve(&self, fd: &Resource<types::Descriptor>, path: &str) -> FsResult<Option<Resolved>> {
+    fn resolve_guest_path(
+        &self,
+        fd: &Resource<types::Descriptor>,
+        path: &str,
+    ) -> FsResult<Option<ResolvedGuestPath>> {
         let base = self
             .descriptor_paths
             .get(&fd.rep())
@@ -845,49 +887,51 @@ impl State {
         if path.starts_with('/') || path.contains('\\') {
             return Err(ErrorCode::NotPermitted.into());
         }
-        let absolute = normalize(&format!("{base}/{path}")).map_err(|_| ErrorCode::NotPermitted)?;
-        let (root_path, root) = self
-            .grant_roots
+        let guest_path =
+            normalize_guest_path(&format!("{base}/{path}")).map_err(|_| ErrorCode::NotPermitted)?;
+        let (grant_guest_path, descriptor) = self
+            .granted_descriptors
             .iter()
             .filter(|(p, _)| {
-                absolute == *p || absolute.starts_with(&format!("{}/", p.trim_end_matches('/')))
+                guest_path == *p || guest_path.starts_with(&format!("{}/", p.trim_end_matches('/')))
             })
             .max_by_key(|(p, r)| (r.writable(), p.len()))
             .ok_or(ErrorCode::NotPermitted)?;
-        let relative = absolute
-            .strip_prefix(root_path)
+        let relative_path = guest_path
+            .strip_prefix(grant_guest_path)
             .unwrap()
             .trim_start_matches('/');
-        Ok(Some(Resolved {
-            root: root.clone(),
-            relative: if relative.is_empty() {
+        Ok(Some(ResolvedGuestPath {
+            descriptor: descriptor.clone(),
+            relative_path: if relative_path.is_empty() {
                 ".".into()
             } else {
-                relative.into()
+                relative_path.into()
             },
-            absolute,
+            guest_path,
         }))
     }
 
-    fn materialize(
+    fn open_resolved_descriptor(
         &mut self,
         fd: Resource<types::Descriptor>,
         path: String,
-        plan: Option<Resolved>,
+        resolved_path: Option<ResolvedGuestPath>,
     ) -> FsResult<(
         Resource<types::Descriptor>,
         String,
         Option<u32>,
         Option<String>,
     )> {
-        let Some(plan) = plan else {
+        let Some(resolved_path) = resolved_path else {
             return Ok((fd, path, None, None));
         };
-        let fd = match plan.root {
-            GrantRoot::Native(types::Descriptor::Dir(d)) => {
-                let root = cap_std::fs::Dir::from_std_file(d.dir.try_clone()?);
-                let (parent, name) = crate::access::secure_parent(&root, &plan.relative)
-                    .map_err(|_| ErrorCode::NotPermitted)?;
+        let fd = match resolved_path.descriptor {
+            GrantedDescriptor::Native(types::Descriptor::Dir(d)) => {
+                let descriptor = cap_std::fs::Dir::from_std_file(d.dir.try_clone()?);
+                let (parent, name) =
+                    crate::access::open_parent_directory_without_symlinks(&descriptor, &resolved_path.relative_path)
+                        .map_err(|_| ErrorCode::NotPermitted)?;
                 let descriptor = types::Descriptor::Dir(wasmtime_wasi::filesystem::Dir::new(
                     parent.into_std_file(),
                     d.perms,
@@ -896,17 +940,22 @@ impl State {
                 ));
                 let fd = self.table.push(descriptor)?;
                 let rep = fd.rep();
-                return Ok((fd, name, Some(rep), Some(plan.absolute)));
+                return Ok((fd, name, Some(rep), Some(resolved_path.guest_path)));
             }
-            GrantRoot::Native(d) => self.table.push(d)?,
-            GrantRoot::Virtual(m) => Resource::new_own(self.table.push(m)?.rep()),
+            GrantedDescriptor::Native(d) => self.table.push(d)?,
+            GrantedDescriptor::Virtual(m) => Resource::new_own(self.table.push(m)?.rep()),
         };
         let rep = fd.rep();
-        Ok((fd, plan.relative, Some(rep), Some(plan.absolute)))
+        Ok((
+            fd,
+            resolved_path.relative_path,
+            Some(rep),
+            Some(resolved_path.guest_path),
+        ))
     }
 }
 
-impl GrantRoot {
+impl GrantedDescriptor {
     fn writable(&self) -> bool {
         match self {
             Self::Native(types::Descriptor::Dir(d)) => d.perms == FsPerms::ReadWrite,

@@ -1,0 +1,16 @@
+name = "fuzzy-search"
+version = "0.1.0"
+description = "Rank newline-separated candidates using fuzzy matching"
+entrypoint = "match-candidates"
+[[arguments]]
+name = "query"
+help = "Fuzzy query"
+[[arguments]]
+name = "candidates"
+help = "Newline-separated candidate strings"
+[options.limit]
+help = "Maximum number of results"
+default = 20
+[options.max-typos]
+help = "Allowed missing query characters (0 to 2)"
+default = 0

@@ -6,7 +6,7 @@
 /// And tool calling
 /// sat <toolname> <toolarg1> <toolarg2> --<toolkwarg1> <toolkwargvalue1> ... --
 /// --<read/write/allow-http/deny_http> <path or uri>
-use crate::config::Settings;
+use crate::config::ToolSettings;
 use anyhow::Result;
 use clap::{ArgAction, Parser, Subcommand};
 
@@ -46,10 +46,7 @@ pub enum Action {
 }
 
 #[derive(Parser, Default)]
-#[command(
-    name = "sat permissions",
-    about = "Tool permissions"
-)]
+#[command(name = "sat permissions", about = "Tool permissions")]
 struct Permissions {
     #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", value_name="PATH")]
     read: Option<Vec<String>>,
@@ -65,7 +62,10 @@ struct Permissions {
     deny_http: Option<Vec<String>>,
 }
 
-pub fn invocation(args: &[String], settings: &mut Settings) -> Result<Vec<String>> {
+pub fn apply_permission_overrides(
+    args: &[String],
+    settings: &mut ToolSettings,
+) -> Result<Vec<String>> {
     //
     // check if we have non-tool-specific parameters (e.g. read/write, etc.) after '--'
     let Some(separator) = args.iter().position(|a| a == "--") else {
@@ -75,7 +75,7 @@ pub fn invocation(args: &[String], settings: &mut Settings) -> Result<Vec<String
         std::iter::once("permissions".into()).chain(args[separator + 1..].iter().cloned()),
     )?;
 
-    fn clean(v: Vec<String>) -> Vec<String> {
+    fn remove_empty_permission_values(v: Vec<String>) -> Vec<String> {
         v.into_iter().filter(|s| !s.is_empty()).collect()
     }
     for (override_, target) in [
@@ -91,21 +91,20 @@ pub fn invocation(args: &[String], settings: &mut Settings) -> Result<Vec<String
         ),
     ] {
         if let Some(v) = override_ {
-            *target = clean(v);
+            *target = remove_empty_permission_values(v);
         }
     }
     if let Some(v) = permissions.allow_http {
-        settings.http_permissions.allow_http = Some(clean(v));
+        settings.http_permissions.allow_http = Some(remove_empty_permission_values(v));
         settings.http_permissions.deny_http = None;
     }
     if let Some(v) = permissions.deny_http {
-        settings.http_permissions.deny_http = Some(clean(v));
+        settings.http_permissions.deny_http = Some(remove_empty_permission_values(v));
         settings.http_permissions.allow_http = None;
     }
     settings.http_permissions.validate()?;
     Ok(args[..separator].to_vec())
 }
-
 
 #[cfg(test)]
 pub mod test {

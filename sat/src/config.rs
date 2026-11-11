@@ -12,12 +12,12 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct Configuration {
     #[serde(default)]
-    pub tools: BTreeMap<String, Settings>,
+    pub tools: BTreeMap<String, ToolSettings>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct Settings {
+pub struct ToolSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
     pub file_permissions: FilePermissions,
@@ -51,7 +51,7 @@ impl Default for HttpPermissions {
     }
 }
 
-impl Default for Settings {
+impl Default for ToolSettings {
     fn default() -> Self {
         Self {
             alias: None,
@@ -61,7 +61,7 @@ impl Default for Settings {
     }
 }
 
-impl Settings {
+impl ToolSettings {
     pub fn validate(&self, home: &Path, cwd: &Path) -> Result<()> {
         if let Some(alias) = &self.alias {
             ensure!(
@@ -86,10 +86,11 @@ impl Configuration {
     }
 
     pub fn effective(home: &Path, cwd: &Path) -> Result<Self> {
+        // effective configuration, resolved from project and home sat directories
         let mut global = Self::read(&home.join("config.toml"))?;
         let local = Self::read(&project_config(cwd))?;
         global.tools.extend(local.tools);
-        let names = crate::registry::names(home)?;
+        let names = crate::registry::registered_tool_names(home)?;
         global.check_aliases(&names)?;
         for (name, settings) in &global.tools {
             ensure!(
@@ -143,7 +144,7 @@ pub fn home() -> Result<PathBuf> {
                 .or_else(|| std::env::var_os("USERPROFILE"))
                 .map(|p| PathBuf::from(p).join(".sat"))
         })
-        .context("set SAT_HOME or HOME/USERPROFILE")?;
+        .context("SAT_HOME is not set and under HOME no .sat directory was found.")?;
     Ok(std::path::absolute(path)?)
 }
 

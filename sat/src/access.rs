@@ -1,6 +1,4 @@
-//! Filesystem authority shared by WASI and named text interfaces.
-//! Symlinks are never followed; rename/link are rejected by the WASI adapter.
-
+//! Handle the file access. This file is mostly about resolving and cleaning paths
 use crate::config::FilePermissions;
 use anyhow::{Context, Result, ensure};
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
@@ -9,7 +7,7 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone)]
-pub struct Root {
+pub struct FilesystemGrant {
     pub path: PathBuf,
     pub guest: String,
     pub write: bool,
@@ -18,7 +16,7 @@ pub struct Root {
 
 #[derive(Clone)]
 pub struct Access {
-    pub roots: Vec<Root>,
+    pub grants: Vec<FilesystemGrant>,
     deny_read: GlobSet,
     deny_write: GlobSet,
 }
@@ -41,54 +39,55 @@ pub fn match_patterns(patterns: &[String]) -> Result<GlobSet> {
     Ok(builder.build()?)
 }
 
-pub fn path(text: &str, home: &Path, cwd: &Path) -> Result<PathBuf> {
+pub fn expand_path(path_str: &str, home: &Path, cwd: &Path) -> Result<PathBuf> {
     // todo: shouldn't we resolve this using os variables?
-    let expanded = if text == "$PWD" {
+    let expanded_path = if path_str == "$PWD" {
         cwd.to_path_buf()
-    } else if let Some(rest) = text.strip_prefix("$PWD/") {
+    } else if let Some(rest) = path_str.strip_prefix("$PWD/") {
         cwd.join(rest)
-    } else if text == "$SAT_HOME" {
+    } else if path_str == "$SAT_HOME" {
         home.to_path_buf()
-    } else if let Some(rest) = text.strip_prefix("$SAT_HOME/") {
+    } else if let Some(rest) = path_str.strip_prefix("$SAT_HOME/") {
         home.join(rest)
     } else {
-        PathBuf::from(text)
+        PathBuf::from(path_str)
     };
     ensure!(
-        expanded.is_absolute(),
+        expanded_path.is_absolute(),
         "grant paths must be absolute or start with $PWD/ or $SAT_HOME/"
     );
     let mut clean = PathBuf::new();
-    for c in expanded.components() {
+    for c in expanded_path.components() {
         match c {
             Component::ParentDir => {
                 ensure!(clean.pop(), "path escapes root");
-            }
-            Component::CurDir => {}
+            },
+            Component::CurDir => {},
             c => clean.push(c.as_os_str()),
         }
     }
     Ok(clean)
 }
 
-pub fn guest_path(path: &Path) -> Result<String> {
-    let text = path
+pub fn convert_to_guest_path(path: &Path) -> Result<String> {
+    let path_str = path
         .to_str()
         .context("paths must be UTF-8")?
         .replace('\\', "/");
-    Ok(if text.starts_with('/') {
-        text
+    Ok(if path_str.starts_with('/') {
+        path_str
     } else {
-        format!("/{text}")
+        format!("/{path_str}")
     })
 }
 
 impl Access {
     pub fn new(settings: &FilePermissions, home: &Path, cwd: &Path) -> Result<Self> {
-        let mut roots: Vec<Root> = vec![];
-        for (list, write) in [(&settings.read, false), (&settings.write, true)] {
-            for text in list {
-                let path = path(text, home, cwd)?;
+        let mut grants: Vec<FilesystemGrant> = vec![];
+        // wtf, why text? isn't permission the better name?
+        for (permission_list, write) in [(&settings.read, false), (&settings.write, true)] {
+            for file_dir_path in permission_list {
+                let path = expand_path(file_dir_path, home, cwd)?;
                 let meta = std::fs::symlink_metadata(&path).context("grant path must exist")?;
                 ensure!(
                     !meta.file_type().is_symlink(),
@@ -98,22 +97,23 @@ impl Access {
                     meta.is_file() || meta.is_dir(),
                     "grant must be a regular file or directory"
                 );
-                // Canonical ancestors prevent aliases of a grant from changing deny coordinates.
-                let canonical = std::fs::canonicalize(&path)?;
-                if let Some(root) = roots.iter_mut().find(|r| r.path == canonical) {
-                    root.write |= write;
+                // If some files overlap, e.g. have read and write permissions, through ancestors,
+                // we resolve this correctly
+                let canonical_path = std::fs::canonicalize(&path)?;
+                if let Some(grant) = grants.iter_mut().find(|r| r.path == canonical_path) {
+                    grant.write |= write;
                     continue;
                 }
-                roots.push(Root {
-                    guest: guest_path(&path)?,
-                    path: canonical,
+                grants.push(FilesystemGrant {
+                    guest: convert_to_guest_path(&path)?,
+                    path: canonical_path,
                     write,
                     directory: meta.is_dir(),
                 });
             }
         }
         Ok(Self {
-            roots,
+            grants,
             deny_read: match_patterns(&settings.deny_read)?,
             deny_write: match_patterns(&settings.deny_write)?,
         })
@@ -125,13 +125,13 @@ impl Access {
         } else {
             &self.deny_read
         };
-        self.roots.iter().any(|root| {
-            let relative = if root.directory {
-                let Ok(relative) = path.strip_prefix(&root.path) else {
+        self.grants.iter().any(|grant| {
+            let relative = if grant.directory {
+                let Ok(relative) = path.strip_prefix(&grant.path) else {
                     return false;
                 };
                 relative.to_path_buf()
-            } else if path == root.path {
+            } else if path == grant.path {
                 PathBuf::from(path.file_name().unwrap())
             } else {
                 return false;
@@ -147,7 +147,7 @@ impl Access {
 
     pub fn authorize(&self, path: &Path, write: bool) -> Result<()> {
         ensure!(
-            self.roots.iter().any(
+            self.grants.iter().any(
                 |r| (path == r.path || r.directory && path.starts_with(&r.path))
                     && (!write || r.write)
             ),
@@ -157,14 +157,14 @@ impl Access {
         Ok(())
     }
 
-    pub fn host_for_guest(&self, guest: &str) -> Option<PathBuf> {
-        self.roots
+    pub fn resolve_guest_path_to_host_path(&self, guest_path_str: &str) -> Option<PathBuf> {
+        self.grants
             .iter()
             .filter_map(|r| {
-                if guest == r.guest {
+                if guest_path_str == r.guest {
                     Some((r.guest.len(), r.path.clone()))
                 } else if r.directory {
-                    guest
+                    guest_path_str
                         .strip_prefix(&format!("{}/", r.guest.trim_end_matches('/')))
                         .map(|rest| (r.guest.len(), r.path.join(rest)))
                 } else {
@@ -177,7 +177,7 @@ impl Access {
 }
 
 /// Walk one component at a time with no-follow semantics, pinning each parent.
-pub fn secure_parent(root: &Dir, relative: &str) -> std::io::Result<(Dir, String)> {
+pub fn open_parent_directory_without_symlinks(root: &Dir, relative: &str) -> std::io::Result<(Dir, String)> {
     let mut dir = root.try_clone()?;
     let components: Vec<_> = Path::new(relative).components().collect();
     if components
