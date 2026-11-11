@@ -5,6 +5,19 @@
 
 ## Set up another machine
 
+For SAT development, the pinned Rust toolchain includes Clippy and rustfmt.
+Run these commands from the repository root:
+
+```sh
+cargo fmt --manifest-path sat/Cargo.toml --all
+cargo fmt --manifest-path sat/Cargo.toml --all -- --check
+cargo clippy --manifest-path sat/Cargo.toml --all-targets --locked
+```
+
+The SAT lint workflow checks formatting and runs Clippy on pushes and pull
+requests. Clippy reports warnings without treating them as errors while the
+current SAT implementation is under development.
+
 For the file-content search CLI, run commands from the repository root. Install
 Rustup, Wasmtime 48.0.2, and Python 3 plus grep for the CLI tests. The scripts
 require Bash; on Windows, use WSL. `rust-toolchain.toml` pins Rust 1.98.1 and
