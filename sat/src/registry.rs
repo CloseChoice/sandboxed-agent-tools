@@ -54,7 +54,11 @@ pub fn load(home: &Path, name: &str) -> Result<runtime::LoadedTool> {
     let dir = registered_tool_directory(home, name)?;
     let metadata = ToolMetadata::parse(&fs::read_to_string(dir.join("tool.toml"))?)?;
     ensure!(metadata.name == name, "registered tool name mismatch");
-    runtime::LoadedTool::load(&fs::read(dir.join("tool.wasm"))?, metadata)
+    runtime::LoadedTool::load_with_cache(
+        &fs::read(dir.join("tool.wasm"))?,
+        metadata,
+        Some(&home.join(".cache")),
+    )
 }
 
 fn read_archive_entry(
@@ -336,7 +340,13 @@ pub async fn register(
         !destination.try_exists()? || force,
         "tool {name} already exists; use --force (-f) to overwrite"
     );
-    runtime::LoadedTool::load(&fs::read(temporary.path().join("tool.wasm"))?, meta)?;
+    writeln!(output, "Compiling and validating {name} for this host...")?;
+    output.flush()?;
+    runtime::LoadedTool::load_with_cache(
+        &fs::read(temporary.path().join("tool.wasm"))?,
+        meta,
+        Some(&home.join(".cache")),
+    )?;
     let suggested =
         parse_suggested_permissions(&fs::read_to_string(temporary.path().join("defaults.toml"))?)?;
     // Validate configuration before prompting or changing any installed state.
@@ -375,7 +385,7 @@ pub async fn register(
         }
         return Err(e);
     }
-    writeln!(output, "Registered {name}")?;
+    writeln!(output, "Registered {name} (compiled and ready to run)")?;
     Ok(())
 }
 
@@ -402,4 +412,66 @@ pub fn unregister(name: &str, home: &Path, cwd: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod compilation_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn registration_compiles_before_first_execution() {
+        let temporary = tempfile::tempdir().unwrap();
+        let home = temporary.path().join("registry");
+        let cwd = temporary.path().join("project");
+        fs::create_dir(&cwd).unwrap();
+        let archive = temporary.path().join("probe.tar");
+        let wasm = wat::parse_str(
+            r#"(component
+            (core module $m (func (export "run") (result i32) i32.const 0))
+            (core instance $i (instantiate $m))
+            (func (export "run") (result s32) (canon lift (core func $i "run")))
+        )"#,
+        )
+        .unwrap();
+        let mut builder = tar::Builder::new(fs::File::create(&archive).unwrap());
+        for (name, bytes) in [
+            ("tool.wasm", wasm.as_slice()),
+            (
+                "tool.toml",
+                b"name='probe'\nversion='1'\ndescription='probe'\nentrypoint='run'".as_slice(),
+            ),
+            ("defaults.toml", b"".as_slice()),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, bytes).unwrap();
+        }
+        builder.finish().unwrap();
+        let mut output = Vec::new();
+        register(
+            archive.to_str().unwrap(),
+            false,
+            &home,
+            &cwd,
+            &mut std::io::Cursor::new(b"y\ny\ny\ny\ny\ny\n"),
+            &mut output,
+        )
+        .await
+        .unwrap();
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .contains("compiled and ready to run")
+        );
+        // A fresh engine loads from the on-disk cache populated by registration.
+        let tool = load(&home, "probe").unwrap();
+        let cache = tool.compilation_cache.as_ref().unwrap();
+        assert!(cache.cache_hits() > 0);
+        assert_eq!(cache.cache_misses(), 0);
+        tool.run(&[], &ToolSettings::default(), &home, &cwd)
+            .await
+            .unwrap();
+    }
 }

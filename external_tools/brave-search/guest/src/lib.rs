@@ -1,14 +1,25 @@
 mod bindings {
     use super::BraveSearch;
+    #[cfg(not(feature = "sat"))]
     wit_bindgen::generate!({ path: "../wit", world: "brave-search", generate_all });
+    #[cfg(feature = "sat")]
+    wit_bindgen::generate!({ path: "../wit", world: "sat-brave-search", generate_all });
     export!(BraveSearch with_types_in self);
 }
 
+#[cfg(not(feature = "sat"))]
 use bindings::exports::example::brave_search::search::{Guest, Hit};
+#[cfg(feature = "sat")]
+use bindings::Hit;
+#[cfg(not(feature = "sat"))]
+use bindings::example::brave_search::search::Hit as RootHit;
+#[cfg(feature = "sat")]
+use bindings::Hit as RootHit;
 use bindings::wasi;
 
 struct BraveSearch;
 
+#[cfg(not(feature = "sat"))]
 impl Guest for BraveSearch {
     fn search(query: String) -> Result<Vec<Hit>, String> {
         search(&query, None)
@@ -16,8 +27,14 @@ impl Guest for BraveSearch {
 }
 
 impl bindings::Guest for BraveSearch {
-    fn search_web(query: String, api_key: String) -> Result<Vec<Hit>, String> {
-        search(&query, Some(&api_key))
+    fn search_web(query: String, api_key: String) -> Result<Vec<RootHit>, String> {
+        search(&query, Some(&api_key)).map(|hits| {
+            hits.into_iter().map(|hit| RootHit {
+                title: hit.title,
+                url: hit.url,
+                description: hit.description,
+            }).collect()
+        })
     }
 
     fn sandbox_probe() -> Result<(), String> {

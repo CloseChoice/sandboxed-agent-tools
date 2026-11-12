@@ -8,7 +8,20 @@ use sandboxed_agent_tools::{
 };
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> std::process::ExitCode {
+    match run().await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            if let Some(status) = error.downcast_ref::<sandboxed_agent_tools::runtime::ToolExit>() {
+                return std::process::ExitCode::from(status.0 as u8);
+            }
+            eprintln!("Error: {error:#}");
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let home = config::home()?;
     let cwd = std::env::current_dir()?;

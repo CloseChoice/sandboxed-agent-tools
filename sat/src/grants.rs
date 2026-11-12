@@ -458,7 +458,32 @@ impl HostDescriptor for RuntimeState {
         new_fd: Resource<types::Descriptor>,
         new_path: String,
     ) -> FsResult<()> {
-        Err(ErrorCode::NotPermitted.into())
+        // Both endpoints need explicit write authority; parent traversal is pinned
+        // with no-follow handles before the runtime performs the rename.
+        self.authorize_relative_guest_path(&fd, &old_path, true)?;
+        self.authorize_relative_guest_path(&new_fd, &new_path, true)?;
+        let old_resolved = self.resolve_guest_path(&fd, &old_path)?;
+        let new_resolved = self.resolve_guest_path(&new_fd, &new_path)?;
+        let (old_fd, old_path, old_temporary, _) =
+            self.open_resolved_descriptor(fd, old_path, old_resolved)?;
+        let (new_fd, new_path, new_temporary, _) =
+            match self.open_resolved_descriptor(new_fd, new_path, new_resolved) {
+                Ok(value) => value,
+                Err(error) => {
+                    if let Some(rep) = old_temporary {
+                        HostDescriptor::drop(self, Resource::new_own(rep))
+                            .map_err(FsError::trap)?;
+                    }
+                    return Err(error);
+                }
+            };
+        let result = self
+            .rename_at_resolved(old_fd, old_path, new_fd, new_path)
+            .await;
+        for rep in [old_temporary, new_temporary].into_iter().flatten() {
+            HostDescriptor::drop(self, Resource::new_own(rep)).map_err(FsError::trap)?;
+        }
+        result
     }
 
     async fn symlink_at(
@@ -840,6 +865,10 @@ struct ResolvedGuestPath {
 
 impl RuntimeState {
     fn authorize_guest_path(&self, guest_path: &str, write: bool) -> FsResult<()> {
+        // The synthetic cwd has directory metadata, but confers no access to children.
+        if !write && self.guest_cwd.as_deref() == Some(guest_path) {
+            return Ok(());
+        }
         let host = self
             .access
             .resolve_guest_path_to_host_path(guest_path)
@@ -892,8 +921,12 @@ impl RuntimeState {
         let (grant_guest_path, descriptor) = self
             .granted_descriptors
             .iter()
-            .filter(|(p, _)| {
-                guest_path == *p || guest_path.starts_with(&format!("{}/", p.trim_end_matches('/')))
+            .filter(|(p, descriptor)| {
+                guest_path == *p
+                    || (!matches!(
+                        descriptor,
+                        GrantedDescriptor::Virtual(Mount::WorkingDirectory)
+                    ) && guest_path.starts_with(&format!("{}/", p.trim_end_matches('/'))))
             })
             .max_by_key(|(p, r)| (r.writable(), p.len()))
             .ok_or(ErrorCode::NotPermitted)?;
@@ -929,9 +962,11 @@ impl RuntimeState {
         let fd = match resolved_path.descriptor {
             GrantedDescriptor::Native(types::Descriptor::Dir(d)) => {
                 let descriptor = cap_std::fs::Dir::from_std_file(d.dir.try_clone()?);
-                let (parent, name) =
-                    crate::access::open_parent_directory_without_symlinks(&descriptor, &resolved_path.relative_path)
-                        .map_err(|_| ErrorCode::NotPermitted)?;
+                let (parent, name) = crate::access::open_parent_directory_without_symlinks(
+                    &descriptor,
+                    &resolved_path.relative_path,
+                )
+                .map_err(|_| ErrorCode::NotPermitted)?;
                 let descriptor = types::Descriptor::Dir(wasmtime_wasi::filesystem::Dir::new(
                     parent.into_std_file(),
                     d.perms,

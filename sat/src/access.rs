@@ -19,6 +19,7 @@ pub struct Access {
     pub grants: Vec<FilesystemGrant>,
     deny_read: GlobSet,
     deny_write: GlobSet,
+    protected_home: PathBuf,
 }
 
 pub fn match_patterns(patterns: &[String]) -> Result<GlobSet> {
@@ -61,8 +62,8 @@ pub fn expand_path(path_str: &str, home: &Path, cwd: &Path) -> Result<PathBuf> {
         match c {
             Component::ParentDir => {
                 ensure!(clean.pop(), "path escapes root");
-            },
-            Component::CurDir => {},
+            }
+            Component::CurDir => {}
             c => clean.push(c.as_os_str()),
         }
     }
@@ -114,12 +115,18 @@ impl Access {
         }
         Ok(Self {
             grants,
+            protected_home: std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf()),
             deny_read: match_patterns(&settings.deny_read)?,
             deny_write: match_patterns(&settings.deny_write)?,
         })
     }
 
     pub fn denied(&self, path: &Path, write: bool) -> bool {
+        // Registry metadata and compiled native cache entries are trusted host state.
+        // Even a broad ancestor grant must never expose them to a component.
+        if path.starts_with(&self.protected_home) {
+            return true;
+        }
         let patterns = if write {
             &self.deny_write
         } else {
@@ -147,10 +154,9 @@ impl Access {
 
     pub fn authorize(&self, path: &Path, write: bool) -> Result<()> {
         ensure!(
-            self.grants.iter().any(
-                |r| (path == r.path || r.directory && path.starts_with(&r.path))
-                    && (!write || r.write)
-            ),
+            self.grants.iter().any(|r| (path == r.path
+                || r.directory && path.starts_with(&r.path))
+                && (!write || r.write)),
             "filesystem access denied"
         );
         ensure!(!self.denied(path, write), "filesystem access denied");
@@ -177,7 +183,10 @@ impl Access {
 }
 
 /// Walk one component at a time with no-follow semantics, pinning each parent.
-pub fn open_parent_directory_without_symlinks(root: &Dir, relative: &str) -> std::io::Result<(Dir, String)> {
+pub fn open_parent_directory_without_symlinks(
+    root: &Dir,
+    relative: &str,
+) -> std::io::Result<(Dir, String)> {
     let mut dir = root.try_clone()?;
     let components: Vec<_> = Path::new(relative).components().collect();
     if components

@@ -9,6 +9,14 @@ pub struct ToolMetadata {
     pub version: String,
     pub description: String,
     pub entrypoint: String,
+    pub fuel: Option<u64>,
+    pub stdin: Option<String>,
+    #[serde(default)]
+    pub verbatim_output: bool,
+    #[serde(default)]
+    pub command_output: bool,
+    #[serde(default)]
+    pub cli_passthrough: bool,
     #[serde(default)]
     pub arguments: Vec<Argument>,
     #[serde(default)]

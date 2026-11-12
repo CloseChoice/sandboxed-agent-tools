@@ -1,0 +1,187 @@
+name: Build and release tools
+
+on:
+  pull_request:
+    paths:
+      - 'external_tools/**'
+      - 'sat/**'
+      - 'rust-toolchain.toml'
+      - 'scripts/**'
+      - '.github/workflows/tool-releases.yml'
+  push:
+    branches: ['**']
+    tags: ['v*']
+    paths:
+      - 'external_tools/**'
+      - 'sat/**'
+      - 'rust-toolchain.toml'
+      - 'scripts/**'
+      - '.github/workflows/tool-releases.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tool-releases-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  versions:
+    name: Check release versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Test release synchronization and tagging
+        run: python3 -m unittest discover -s scripts -p 'test_release.py'
+      - name: Check Cargo, lockfile, and tool metadata versions
+        run: python3 scripts/release.py
+      - name: Require the pushed tag to match the bundle version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/release.py --check-tag "$RELEASE_TAG"
+
+  build:
+    name: Build ${{ matrix.tool }}
+    needs: versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        tool:
+          - brave-search
+          - code
+          - file-list
+          - file-search
+          - fuzzy-search
+          - jaq
+          - pdf-tools
+          - ripgrep
+          - uutils
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      TOOL: ${{ matrix.tool }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install the repository Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustup target add wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: external_tools/${{ matrix.tool }} -> target
+          key: tools-${{ matrix.tool }}-wasi-sdk-34
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Install verified WASI SDK for Tree-sitter
+        if: matrix.tool == 'code'
+        env:
+          SDK_SHA256: b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
+        run: |
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/wasi-sdk.tar.gz" \
+            https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz
+          echo "$SDK_SHA256  $RUNNER_TEMP/wasi-sdk.tar.gz" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/wasi-sdk.tar.gz" --directory "$RUNNER_TEMP"
+          echo "WASI_SDK_PATH=$RUNNER_TEMP/wasi-sdk-34.0-x86_64-linux" >> "$GITHUB_ENV"
+      - name: Build the installable WASI archive
+        run: bash "external_tools/$TOOL/package.sh" tar
+      - name: Verify archive contents and metadata
+        run: python3 external_tools/check_archives.py "external_tools/$TOOL/dist/"*.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tool-${{ matrix.tool }}
+          path: external_tools/${{ matrix.tool }}/dist/*.tar
+          if-no-files-found: error
+          retention-days: 14
+
+  validate:
+    name: Validate packages with SAT
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sat -> target
+          key: tool-release-host
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: tool-*
+          path: release-assets
+          merge-multiple: true
+      - name: Build SAT from this release's sources
+        run: cargo build --locked --manifest-path sat/Cargo.toml
+      - name: Check archives, register tools, and validate their entrypoints
+        run: python3 external_tools/check_archives.py --complete --sat sat/target/debug/sat release-assets/*.tar
+
+  release:
+    name: Publish tool archives
+    needs: validate
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: tool-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify the complete set of release assets
+        run: python3 external_tools/check_archives.py --complete release-assets/*.tar
+      - name: Generate checksums
+        working-directory: release-assets
+        run: sha256sum *.tar > SHA256SUMS
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=(release-assets/*.tar release-assets/SHA256SUMS)
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            # Reruns can finish an interrupted upload without creating another release.
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            if [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" == true ]]; then
+              gh release edit "$RELEASE_TAG" --draft=false
+            fi
+          else
+            options=(--verify-tag --generate-notes --title "$RELEASE_TAG")
+            if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
+              options+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" "${assets[@]}" "${options[@]}"
+          fi

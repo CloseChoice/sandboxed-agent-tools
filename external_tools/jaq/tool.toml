@@ -1,0 +1,10 @@
+name = "jaq"
+version = "3.1.2"
+description = "Upstream jaq CLI: jq-compatible filters, positional files, stdin, variables, modules, and JSON/YAML/TOML/XML/CBOR formats"
+entrypoint = "run"
+fuel = 1000000000
+command_output = true
+cli_passthrough = true
+[[arguments]]
+name = "args"
+help = "Arguments passed unchanged to upstream jaq"

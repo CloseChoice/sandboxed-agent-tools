@@ -22,6 +22,7 @@ pub struct FilesystemImport {
     pub directory: bool,
     pub read: bool,
     pub write: bool,
+    pub binary_write: bool,
 }
 
 pub fn discover_filesystem_imports(
@@ -43,6 +44,7 @@ pub fn discover_filesystem_imports(
             directory,
             read: functions.iter().any(|(n, _)| *n == "read"),
             write: functions.iter().any(|(n, _)| *n == "write"),
+            binary_write: functions.iter().any(|(n, item)| *n == "write" && matches!(&item.ty, ComponentItem::ComponentFunc(f) if matches!(f.params().last(), Some((_, Type::List(l))) if matches!(l.ty(), Type::U8)))),
         };
         ensure!(
             filesystem_import.read || filesystem_import.write,
@@ -65,7 +67,12 @@ pub fn discover_filesystem_imports(
             ensure!(
                 !f.async_()
                     && f.params().len() == count
-                    && f.params().all(|(_, t)| matches!(t, Type::String)),
+                    && f.params().enumerate().all(|(i, (_, t))| {
+                        matches!(t, Type::String)
+                            || (operation == "write"
+                                && i == count - 1
+                                && matches!(t, Type::List(l) if matches!(l.ty(), Type::U8)))
+                    }),
                 "invalid parameters for {name}.{operation}"
             );
             let result = match f.results().collect::<Vec<_>>().as_slice() {
@@ -199,7 +206,9 @@ impl FilesystemBinding {
         };
         match &mut self.resource {
             BoundFilesystemResource::Directory(dir) => {
-                let (parent, name) = hide_host_path_in_error(access::open_parent_directory_without_symlinks(dir, path))?;
+                let (parent, name) = hide_host_path_in_error(
+                    access::open_parent_directory_without_symlinks(dir, path),
+                )?;
                 read(&mut hide_host_path_in_error(access::open_file(
                     &parent, &name, false, false,
                 ))?)
@@ -208,7 +217,7 @@ impl FilesystemBinding {
         }
     }
 
-    fn write(&mut self, path: &str, text: &str) -> Result<(), String> {
+    fn write(&mut self, path: &str, bytes: &[u8]) -> Result<(), String> {
         if !self.write {
             return Err("write denied".into());
         }
@@ -218,12 +227,14 @@ impl FilesystemBinding {
                 access::check_file(file)?;
                 file.seek(SeekFrom::Start(0))?;
                 file.set_len(0)?;
-                file.write_all(text.as_bytes())
+                file.write_all(bytes)
             })())
         };
         match &mut self.resource {
             BoundFilesystemResource::Directory(dir) => {
-                let (parent, name) = hide_host_path_in_error(access::open_parent_directory_without_symlinks(dir, path))?;
+                let (parent, name) = hide_host_path_in_error(
+                    access::open_parent_directory_without_symlinks(dir, path),
+                )?;
                 write(&mut hide_host_path_in_error(access::open_file(
                     &parent, &name, true, true,
                 ))?)
@@ -241,7 +252,8 @@ impl FilesystemBinding {
             return Err("not a directory".into());
         };
         use cap_fs_ext::DirExt;
-        let (parent, name) = hide_host_path_in_error(access::open_parent_directory_without_symlinks(dir, path))?;
+        let (parent, name) =
+            hide_host_path_in_error(access::open_parent_directory_without_symlinks(dir, path))?;
         let dir = hide_host_path_in_error(parent.open_dir_nofollow(name))?;
         let mut names = vec![];
         for entry in hide_host_path_in_error(dir.entries())? {
@@ -284,7 +296,29 @@ pub fn link_filesystem_imports(
         }
         if filesystem_import.write {
             let name = filesystem_import.name.clone();
-            if filesystem_import.directory {
+            if filesystem_import.binary_write {
+                if filesystem_import.directory {
+                    interface.func_wrap(
+                        "write",
+                        move |mut s: StoreContextMut<'_, RuntimeState>,
+                              (path, bytes): (String, Vec<u8>)| {
+                            Ok((s
+                                .data_mut()
+                                .files
+                                .get_mut(&name)
+                                .unwrap()
+                                .write(&path, &bytes),))
+                        },
+                    )?;
+                } else {
+                    interface.func_wrap(
+                        "write",
+                        move |mut s: StoreContextMut<'_, RuntimeState>, (bytes,): (Vec<u8>,)| {
+                            Ok((s.data_mut().files.get_mut(&name).unwrap().write("", &bytes),))
+                        },
+                    )?;
+                }
+            } else if filesystem_import.directory {
                 interface.func_wrap(
                     "write",
                     move |mut s: StoreContextMut<'_, RuntimeState>,
@@ -294,14 +328,19 @@ pub fn link_filesystem_imports(
                             .files
                             .get_mut(&name)
                             .unwrap()
-                            .write(&path, &text),))
+                            .write(&path, text.as_bytes()),))
                     },
                 )?;
             } else {
                 interface.func_wrap(
                     "write",
                     move |mut s: StoreContextMut<'_, RuntimeState>, (text,): (String,)| {
-                        Ok((s.data_mut().files.get_mut(&name).unwrap().write("", &text),))
+                        Ok((s
+                            .data_mut()
+                            .files
+                            .get_mut(&name)
+                            .unwrap()
+                            .write("", text.as_bytes()),))
                     },
                 )?;
             }

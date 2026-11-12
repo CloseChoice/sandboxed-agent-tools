@@ -9,5 +9,5 @@ fi
 cd "$tool_dir"
 . ../env.sh
 cargo build --locked --manifest-path Cargo.toml --target-dir "$tool_dir/target" \
-    --release --target wasm32-wasip2 -p brave-search-guest 
+    --release --target wasm32-wasip2 -p brave-search-guest --features sat
 python3 ../package.py "$tool_dir" "$tool_dir/target/wasm32-wasip2/release/brave_search_guest.wasm" "$archive_format"

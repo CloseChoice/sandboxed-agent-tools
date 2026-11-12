@@ -68,7 +68,20 @@ pub fn apply_permission_overrides(
 ) -> Result<Vec<String>> {
     //
     // check if we have non-tool-specific parameters (e.g. read/write, etc.) after '--'
-    let Some(separator) = args.iter().position(|a| a == "--") else {
+    let Some(separator) = args.iter().rposition(|a| a == "--").filter(|i| {
+        args.get(i + 1).is_some_and(|next| {
+            [
+                "--read",
+                "--write",
+                "--deny-read",
+                "--deny-write",
+                "--allow-http",
+                "--deny-http",
+            ]
+            .iter()
+            .any(|flag| next == flag || next.starts_with(&format!("{flag}=")))
+        })
+    }) else {
         return Ok(args.to_vec());
     };
     let permissions = Permissions::try_parse_from(
@@ -107,11 +120,28 @@ pub fn apply_permission_overrides(
 }
 
 #[cfg(test)]
-pub mod test {
-    fn test_invocation() -> bool {
-        // todo: generate string list in the fashion of that clippy generates
-        //
-        // invocation
-        true
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preserves_upstream_separator_and_extracts_only_host_permissions() {
+        let args: Vec<String> = ["-r", ".name", "--", "-input.json"]
+            .map(str::to_owned)
+            .into();
+        let mut settings = ToolSettings::default();
+        assert_eq!(
+            apply_permission_overrides(&args, &mut settings).unwrap(),
+            args
+        );
+        let with_grants: Vec<String> = args
+            .iter()
+            .cloned()
+            .chain(["--", "--read", "/tmp/input.json"].map(str::to_owned))
+            .collect();
+        assert_eq!(
+            apply_permission_overrides(&with_grants, &mut settings).unwrap(),
+            args
+        );
+        assert_eq!(settings.file_permissions.read, ["/tmp/input.json"]);
     }
 }
