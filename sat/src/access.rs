@@ -250,10 +250,32 @@ pub fn check_file(file: &std::fs::File) -> std::io::Result<()> {
 
     #[cfg(windows)]
     {
-        use std::os::windows::fs::MetadataExt;
-        if meta.number_of_links().is_none_or(|n| n > 1) {
+        use cap_fs_ext::MetadataExt;
+        // std's Windows link-count API is nightly-only. Capability metadata
+        // obtains the same information from the already-open file on stable Rust.
+        let file = cap_std::fs::File::from_std(file.try_clone()?);
+        if file.metadata()?.nlink() > 1 {
             return Err(std::io::ErrorKind::PermissionDenied.into());
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hardlinks_cannot_bypass_path_permissions() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original");
+        let alias = directory.path().join("alias");
+        let file = std::fs::File::create(&original).unwrap();
+        super::check_file(&file).unwrap();
+        std::fs::hard_link(&original, &alias).unwrap();
+        assert_eq!(
+            super::check_file(&file).unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        std::fs::remove_file(alias).unwrap();
+        super::check_file(&file).unwrap();
+    }
 }
