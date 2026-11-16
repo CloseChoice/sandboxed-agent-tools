@@ -1,0 +1,34 @@
+{
+  "phototest.tif": {
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/test/232ff181c66516116ec0e84c4963f70de15050fd/testing/phototest.tif",
+    "sha256": "d2241a1eb6d6cd2eb6544b8e228c2862c852b7467d16ed636caa32179b780692"
+  },
+  "phototest.gold.txt": {
+    "url": "https://raw.githubusercontent.com/tesseract-ocr/test/232ff181c66516116ec0e84c4963f70de15050fd/testing/phototest.gold.txt",
+    "sha256": "76ef157baeb6ab275b7d90f310477a8060d5822aea2b2e05d480f459b016a6ed"
+  },
+  "phototest.jpg": {
+    "derived_from": "phototest.tif (Pillow 13.0.0 grayscale; alpha variant composites identically on white)",
+    "sha256": "d4075cd5104ff59bff121ab8f6d79b289726bc4bea7fdbcfe9164fbd07e6acab"
+  },
+  "phototest-alpha.png": {
+    "derived_from": "phototest.tif (Pillow 13.0.0 grayscale; alpha variant composites identically on white)",
+    "sha256": "ae4bcd38e9397bb19aafbc93ae3df4f1bfc01f098183826c24121217f711ff15"
+  },
+  "blank.png": {
+    "derived_from": "generated blank image",
+    "sha256": "4e57eb43472e5c456878e5b68f4c2b9e018c318ad1cc7787f301f24bb2d8e549"
+  },
+  "phototest.bmp": {
+    "derived_from": "phototest.tif (Pillow 13.0.0 grayscale; alpha variant composites identically on white)",
+    "sha256": "e4568c1922c5839d1335b7e5f0c7d98c8f9214c453da5c71fff4b737652bddff"
+  },
+  "phototest.png": {
+    "derived_from": "phototest.tif (Pillow 13.0.0 grayscale; alpha variant composites identically on white)",
+    "sha256": "9864f9daecbcef429b9e6df0c3492875302fe2a9b98eff964056aa3449d10783"
+  },
+  "phototest.pgm": {
+    "derived_from": "phototest.tif (Pillow 13.0.0 grayscale; alpha variant composites identically on white)",
+    "sha256": "4dec65863c9f7e4b562ff13ad65d3616ff86ef9e56ca67dc513c2ccd18c7a28b"
+  }
+}

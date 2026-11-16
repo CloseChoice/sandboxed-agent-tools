@@ -13,7 +13,13 @@ name = "query"
 help = "Search text/regex, or exact symbol name for read-symbol. Omit for outline and read-enclosing."
 
 [options.paths]
-help = "Guest file/directory. Repeat for multiple roots. Use absolute paths and grant read access after --."
+help = "Repeatable file/directory, glob (optionally glob: prefixed), or regex:ROOT::EXPR selector. Quote patterns. Grant roots after --."
+
+[options.path]
+help = "Same as --paths; repeat to combine selectors."
+
+[options.exclude]
+help = "Repeatable exclusion: glob (default) or regex:EXPR. Matches root-relative or full paths; exclusions win. Slash-free globs also match basenames."
 
 [options.mode]
 default = "text"

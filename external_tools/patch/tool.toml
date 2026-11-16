@@ -1,0 +1,16 @@
+name = "patch"
+version = "0.1.0"
+description = "Apply unified diffs with dry-run, reverse and strip options. Strict GNU-style subset using diffy."
+entrypoint = "run"
+command_output = true
+cli_passthrough = true
+
+[[arguments]]
+name = "args"
+help = "Unified-diff CLI arguments; explicit SAT filesystem permissions follow a separate --."
+
+[[examples]]
+command = 'sat patch -p1 -d /absolute/project -i /absolute/change.diff --dry-run -- --read /absolute/change.diff --read /absolute/project'
+
+[[examples]]
+command = 'sat patch -p1 -d /absolute/project -i /absolute/change.diff -- --read /absolute/change.diff --write /absolute/project'

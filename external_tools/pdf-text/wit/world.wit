@@ -1,0 +1,5 @@
+package sat:pdf-text@0.1.0;
+
+world pdf-text {
+    export extract: func(path: string, start-page: u32, max-pages: u32, max-bytes: u32, format: string) -> result<string, string>;
+}

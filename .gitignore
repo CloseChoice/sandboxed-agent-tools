@@ -24,3 +24,18 @@ __pycache__/
 *.zip
 *.tar
 *.tar.gz
+
+# Local credentials, sample inputs, agent logs, and research checkouts
+/keys.md
+/data/
+/codex/
+/experiments/
+/repos/
+
+# Generated JavaScript dependencies and test reports
+node_modules/
+test-results/
+
+# Generated Python packaging probes
+/python-venv-test-package/
+*.egg-info/

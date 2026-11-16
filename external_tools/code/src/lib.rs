@@ -1,4 +1,5 @@
 mod retrieval;
+mod selectors;
 
 wit_bindgen::generate!({ world: "code" });
 
@@ -8,6 +9,8 @@ impl Guest for Code {
         operation: String,
         query: Option<String>,
         paths: Option<Vec<String>>,
+        path: Option<Vec<String>>,
+        exclude: Option<Vec<String>>,
         mode: String,
         context: String,
         position: Option<u32>,
@@ -18,10 +21,16 @@ impl Guest for Code {
         format: String,
         extract: String,
     ) -> Result<String, String> {
+        let mut roots = paths.unwrap_or_default();
+        roots.extend(path.unwrap_or_default());
+        if roots.is_empty() {
+            roots.push(".".into());
+        }
         retrieval::run(retrieval::Request {
             operation,
             query,
-            paths: paths.unwrap_or_else(|| vec![".".into()]),
+            paths: roots,
+            exclude: exclude.unwrap_or_default(),
             mode,
             context,
             position: position.map(|n| n as usize),

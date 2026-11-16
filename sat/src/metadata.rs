@@ -9,6 +9,7 @@ pub struct ToolMetadata {
     pub version: String,
     pub description: String,
     pub entrypoint: String,
+    /// Legacy package field, accepted for archive compatibility but ignored.
     pub fuel: Option<u64>,
     pub stdin: Option<String>,
     #[serde(default)]
@@ -56,6 +57,7 @@ pub const RESERVED: &[&str] = &[
     "remove",
     "unregister",
     "config",
+    "chrome-session",
 ];
 
 pub fn valid_name(name: &str) -> bool {

@@ -24,7 +24,10 @@ wasmtime-wasi-http = "=48.0.2"
 http = "1"
 http-body-util = "0.1"
 cap-std = "4"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
+futures-util = { version = "0.3", features = ["sink"] }
+url = "2"
 
 cap-fs-ext = "4"
 globset = "0.4"

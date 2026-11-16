@@ -18,6 +18,13 @@ pub struct Configuration {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolSettings {
+    /// Explicit authority over a debugging endpoint, independent of HTTP grants.
+    #[serde(
+        default,
+        rename = "cdp-endpoint",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cdp_endpoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
     pub file_permissions: FilePermissions,
@@ -54,6 +61,7 @@ impl Default for HttpPermissions {
 impl Default for ToolSettings {
     fn default() -> Self {
         Self {
+            cdp_endpoint: None,
             alias: None,
             file_permissions: Default::default(),
             http_permissions: Default::default(),
@@ -63,6 +71,9 @@ impl Default for ToolSettings {
 
 impl ToolSettings {
     pub fn validate(&self, home: &Path, cwd: &Path) -> Result<()> {
+        if let Some(endpoint) = &self.cdp_endpoint {
+            crate::browser::validate_endpoint(endpoint)?;
+        }
         if let Some(alias) = &self.alias {
             ensure!(
                 valid_name(alias) && !RESERVED.contains(&alias.as_str()),
@@ -93,6 +104,9 @@ impl Configuration {
         let names = crate::registry::registered_tool_names(home)?;
         global.check_aliases(&names)?;
         for (name, settings) in &global.tools {
+            if let Some(endpoint) = &settings.cdp_endpoint {
+                crate::browser::validate_endpoint(endpoint)?;
+            }
             ensure!(
                 valid_name(name) && !RESERVED.contains(&name.as_str()),
                 "invalid tool name {name}"

@@ -7,6 +7,8 @@ world code {
         operation: string,
         query: option<string>,
         paths: option<list<string>>,
+        path: option<list<string>>,
+        exclude: option<list<string>>,
         mode: string,
         context: string,
         position: option<u32>,

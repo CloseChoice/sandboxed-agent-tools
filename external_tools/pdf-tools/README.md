@@ -26,6 +26,6 @@ Input limits are 16 MiB per file, 256 files, and four million decoded image
 pixels. Existing PDF content is merged using lopdf. This tool does not provide
 OCR, text extraction, or cryptographic signing.
 
-All execution is bounded by the host fuel ceiling. Package metadata can lower
-the budget but cannot increase it. No host environment or network authority is
+SAT runs with fuel metering disabled. Legacy package `fuel` values are
+accepted for compatibility and ignored. No host environment or network authority is
 inherited.

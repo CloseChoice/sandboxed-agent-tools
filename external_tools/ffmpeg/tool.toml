@@ -1,0 +1,16 @@
+name = "ffmpeg"
+version = "0.1.0"
+description = "FFmpeg 5.1.10 extraction profile: upstream CLI, local media to PNG/BMP frames and WAV/FLAC audio. No network or hardware acceleration."
+entrypoint = "run"
+command_output = true
+cli_passthrough = true
+
+[[arguments]]
+name = "args"
+help = "Upstream ffmpeg arguments. Explicit SAT permissions follow a separate --."
+
+[[examples]]
+command = 'sat ffmpeg -i /absolute/input.mp4 -frames:v 1 /absolute/output/frame.png -- --read /absolute/input.mp4 --write /absolute/output'
+
+[[examples]]
+command = 'sat ffmpeg -i /absolute/input.mp4 -vn -c:a pcm_s16le /absolute/output/audio.wav -- --read /absolute/input.mp4 --write /absolute/output'

@@ -31,6 +31,9 @@ pub fn discover_filesystem_imports(
 ) -> Result<Vec<FilesystemImport>> {
     let mut filesystem_imports = Vec::new();
     for (name, item) in component.component_type().imports(engine) {
+        if name == crate::browser::INTERFACE {
+            continue;
+        }
         if name.starts_with("wasi:") {
             continue;
         }

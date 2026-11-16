@@ -1,0 +1,247 @@
+{
+  "commit": "ed178952a6672abdfd35b5f9e76a80b6cefc086e",
+  "test_sha256": {
+    "test_pdf.py": "67694f29cb74866df2ee1b7fd04d9581551529edc4740da5fe84716d3cb4468a",
+    "test_cli_vectors.py": "5fa03eb482c24777aaaff128fee145a14e325900059fe212a6459ffce4ef58b7"
+  },
+  "suites": {
+    "native": {
+      "exit_code": 0,
+      "counts": {
+        "passed": 48,
+        "skipped": 5
+      }
+    },
+    "sat": {
+      "exit_code": 0,
+      "counts": {
+        "passed": 38,
+        "skipped": 15
+      }
+    }
+  },
+  "scope": "Original PDF module plus original CLI vectors filtered to PDF inputs; explicit internal/remote skips",
+  "native_matching_tests_passed": 38,
+  "sat_matching_tests_passed": 38,
+  "sat_failure_reasons": {},
+  "fuel_metering": false,
+  "legacy_package_fuel": "accepted and ignored",
+  "cli_smoke_and_confinement_checks": 28,
+  "help_layout_note": "Python 3.12/3.14 argparse metavar layout differs; names and usage match.",
+  "host_fuel_policy_changed": true,
+  "upstream_files_unmodified": true,
+  "outcomes": {
+    "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_extraction": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_no_duplication": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_correct_position": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableExtraction::test_receipt_pdf_extraction": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableExtraction::test_multipage_invoice_extraction": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableExtraction::test_academic_pdf_extraction": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableExtraction::test_movie_theater_booking_pdf_extraction": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfFullOutputComparison::test_movie_theater_full_output": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfFullOutputComparison::test_sparse_borderless_table_full_output": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfFullOutputComparison::test_repair_multipage_full_output": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfFullOutputComparison::test_receipt_full_output": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfFullOutputComparison::test_academic_paper_full_output": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfFullOutputComparison::test_medical_scan_full_output": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableMarkdownFormat::test_markdown_table_has_pipe_format": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableMarkdownFormat::test_markdown_table_columns_have_pipes": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_borderless_table_structure": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_multipage_invoice_table_structure": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_receipt_has_no_tables": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[SPARSE-2024-INV-1234_borderless_table.pdf-2]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[REPAIR-2022-INV-001_multipage.pdf-6]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[RECEIPT-2024-TXN-98765_retail_purchase.pdf-0]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[test.pdf-0]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfTableStructureConsistency::test_borderless_table_data_integrity": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_partial_numbering_pattern_regex": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_masterformat_partial_numbering_not_split": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_masterformat_content_preserved": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[one-blank-line]": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[multiple-blank-lines]": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[whitespace-only-lines]": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_multiple_partial_numberings_all_merged": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_pdf.py::TestPdfMemoryOptimization::test_page_close_called_on_every_page": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestPdfMemoryOptimization::test_plain_text_pdf_falls_back_to_pdfminer": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestPdfMemoryOptimization::test_plain_text_pdf_still_closes_all_pages": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestPdfMemoryOptimization::test_mixed_pdf_uses_form_extraction_per_page": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestPdfMemoryOptimization::test_only_one_pdfplumber_open_call": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::TestPdfMemoryOptimization::test_real_pdf_page_cleanup": {
+      "native": "passed",
+      "sat": "skipped"
+    },
+    "tests/test_pdf.py::test_markitdown_remote": {
+      "native": "skipped",
+      "sat": "skipped"
+    },
+    "tests/test_cli_vectors.py::test_output_to_stdout[test_vector9]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_output_to_stdout[test_vector10]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_output_to_stdout[test_vector11]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_output_to_stdout[test_vector12]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_output_to_file[test_vector9]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_output_to_file[test_vector10]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_output_to_file[test_vector11]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_output_to_file[test_vector12]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_input_from_stdin_without_hints[test_vector9]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_input_from_stdin_without_hints[test_vector10]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_input_from_stdin_without_hints[test_vector11]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_input_from_stdin_without_hints[test_vector12]": {
+      "native": "passed",
+      "sat": "passed"
+    },
+    "tests/test_cli_vectors.py::test_convert_url[test_vector9]": {
+      "native": "skipped",
+      "sat": "skipped"
+    },
+    "tests/test_cli_vectors.py::test_convert_url[test_vector10]": {
+      "native": "skipped",
+      "sat": "skipped"
+    },
+    "tests/test_cli_vectors.py::test_convert_url[test_vector11]": {
+      "native": "skipped",
+      "sat": "skipped"
+    },
+    "tests/test_cli_vectors.py::test_convert_url[test_vector12]": {
+      "native": "skipped",
+      "sat": "skipped"
+    }
+  }
+}

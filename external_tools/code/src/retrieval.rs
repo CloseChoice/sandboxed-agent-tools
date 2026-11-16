@@ -21,6 +21,7 @@ pub struct Request {
     pub operation: String,
     pub query: Option<String>,
     pub paths: Vec<String>,
+    pub exclude: Vec<String>,
     pub mode: String,
     pub context: String,
     pub position: Option<usize>,
@@ -446,6 +447,7 @@ fn validate(request: &Request) -> Result<(), String> {
     }
     if request.paths.is_empty()
         || request.paths.len() > 128
+        || request.exclude.len() > 128
         || !(1..=1000).contains(&request.max_results)
         || !(1..=MAX_OUTPUT).contains(&request.max_bytes)
     {
@@ -495,10 +497,13 @@ pub fn run(request: Request) -> Result<String, String> {
     } else {
         None
     };
-    let mut walker = WalkBuilder::new(&request.paths[0]);
-    for path in &request.paths[1..] {
+    let selectors = crate::selectors::Selection::new(&request.paths, &request.exclude)?;
+    let mut walker = WalkBuilder::new(&selectors.roots[0]);
+    for path in &selectors.roots[1..] {
         walker.add(path);
     }
+    let pruning = selectors.clone();
+    walker.filter_entry(move |entry| !pruning.excluded(entry.path()));
     walker
         .parents(false)
         .git_global(false)
@@ -522,6 +527,9 @@ pub fn run(request: Request) -> Result<String, String> {
             continue;
         }
         let path = entry.path();
+        if !selectors.includes(path) {
+            continue;
+        }
         let Some((language_name, grammar)) = language(path) else {
             if entry.depth() == 0 {
                 return Err("unsupported language; use .py, .rs, .js/.jsx, .ts, or .tsx".into());

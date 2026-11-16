@@ -28,6 +28,7 @@ impl std::fmt::Display for ToolExit {
 impl std::error::Error for ToolExit {}
 
 pub struct RuntimeState {
+    pub(crate) browser: crate::browser::Connection,
     pub(crate) wasi: WasiCtx,
     http: WasiHttpCtx,
     pub(crate) table: ResourceTable,
@@ -91,7 +92,8 @@ impl LoadedTool {
             })
             .transpose()?;
         config.cache(compilation_cache.clone());
-        config.consume_fuel(true);
+        // Fuel is deliberately unlimited; filesystem/network authority is enforced separately.
+        config.consume_fuel(false);
         config.cranelift_opt_level(wasmtime::OptLevel::None);
         let engine = Engine::new(&config)?;
         let component = Component::new(&engine, bytes)?;
@@ -224,6 +226,7 @@ impl LoadedTool {
         wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
         files::link_filesystem_imports(&mut linker, &filesystem_imports)?;
         crate::grants::link_filesystem_permissions(&mut linker)?;
+        crate::browser::link(&mut linker)?;
         // Resolves imports and checks their types without executing guest code.
         linker.instantiate_pre(&component)?;
         Ok(Self {
@@ -482,6 +485,7 @@ impl LoadedTool {
         let mut store = Store::new(
             &self.engine,
             RuntimeState {
+                browser: crate::browser::Connection::new(settings.cdp_endpoint.clone())?,
                 wasi: wasi.build(),
                 single_file_preopens,
                 guest_cwd,
@@ -495,13 +499,6 @@ impl LoadedTool {
                 access,
             },
         );
-        // Package metadata may lower the budget, never raise the host ceiling.
-        store.set_fuel(
-            self.metadata
-                .fuel
-                .unwrap_or(1_000_000_000)
-                .min(1_000_000_000),
-        )?;
         let instance = self
             .linker
             .instantiate_async(&mut store, &self.component)
@@ -510,17 +507,35 @@ impl LoadedTool {
             .get_func(&mut store, &self.metadata.entrypoint)
             .context("missing entrypoint")?;
         let mut results = vec![Val::Bool(false); f.ty(&store).results().len()];
-        if let Err(error) = f.call_async(&mut store, &params, &mut results).await {
-            if self.metadata.command_output {
-                std::io::stderr().write_all(&stderr.contents())?;
+        let process_exit = match f.call_async(&mut store, &params, &mut results).await {
+            Ok(()) => {
+                f.post_return_async(&mut store).await?;
+                None
             }
-            return Err(error.into());
-        }
-        f.post_return_async(&mut store).await?;
+            Err(error) => {
+                if self.metadata.command_output
+                    && let Some(exit) = error.downcast_ref::<wasmtime_wasi::I32Exit>()
+                {
+                    // Upstream C CLIs use WASI process exit, including exit(0)
+                    // for help/version. This is a status, not a guest trap.
+                    Some(exit.0)
+                } else {
+                    if self.metadata.command_output {
+                        std::io::stderr().write_all(&stderr.contents())?;
+                    }
+                    return Err(error.into());
+                }
+            }
+        };
         if self.metadata.command_output {
             std::io::stderr().write_all(&stderr.contents())?;
-            let [Val::S32(status)] = results.as_slice() else {
-                bail!("expected command exit status")
+            let status = if let Some(status) = process_exit {
+                status
+            } else {
+                let [Val::S32(status)] = results.as_slice() else {
+                    bail!("expected command exit status")
+                };
+                *status
             };
 
             if matches.get_flag("json") {
@@ -531,8 +546,8 @@ impl LoadedTool {
             } else {
                 std::io::stdout().write_all(&stdout.contents())?;
             }
-            if *status != 0 {
-                return Err(ToolExit(*status).into());
+            if status != 0 {
+                return Err(ToolExit(status).into());
             }
             return Ok(());
         }
@@ -718,14 +733,73 @@ mod imported_tool_tests {
     }
 
     #[tokio::test]
-    async fn guest_loop_exhausts_host_enforced_fuel() {
-        let bytes = component("(loop $spin (br $spin)) i32.const 0");
-        let tool = LoadedTool::load(&bytes, metadata("fuel = 1000")).unwrap();
+    async fn command_tools_preserve_wasi_process_exit_status() {
+        let directory = tempfile::tempdir().unwrap();
+        for status in [0, 7, 69] {
+            let bytes = wat::parse_str(format!(
+                r#"(component
+                (import "wasi:cli/exit@0.2.12" (instance $exit
+                    (export "exit-with-code" (func (param "status-code" u8)))))
+                (alias export $exit "exit-with-code" (func $exit))
+                (core func $lower (canon lower (func $exit)))
+                (core module $m
+                    (import "env" "exit" (func $exit (param i32)))
+                    (func (export "run") (result i32)
+                        i32.const {status} call $exit unreachable))
+                (core instance $env (export "exit" (func $lower)))
+                (core instance $i (instantiate $m (with "env" (instance $env))))
+                (func (export "run") (result s32) (canon lift (core func $i "run")))
+            )"#
+            ))
+            .unwrap();
+            let tool = LoadedTool::load(&bytes, metadata("command_output = true")).unwrap();
+            let result = tool
+                .run(&[], &Default::default(), directory.path(), directory.path())
+                .await;
+            if status == 0 {
+                result.unwrap();
+            } else {
+                assert_eq!(
+                    result.unwrap_err().downcast_ref::<ToolExit>().unwrap().0,
+                    status
+                );
+            }
+            // Non-command interfaces must not silently turn an abrupt exit into
+            // a successful structured return value.
+            let tool = LoadedTool::load(&bytes, metadata("")).unwrap();
+            assert!(
+                tool.run(&[], &Default::default(), directory.path(), directory.path())
+                    .await
+                    .is_err()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn command_tools_do_not_swallow_real_traps() {
+        let tool =
+            LoadedTool::load(&component("unreachable"), metadata("command_output = true")).unwrap();
         let directory = tempfile::tempdir().unwrap();
         let error = tool
             .run(&[], &Default::default(), directory.path(), directory.path())
             .await
             .unwrap_err();
-        assert!(format!("{error:#}").contains("fuel"), "{error:#}");
+        assert!(error.downcast_ref::<ToolExit>().is_none());
+    }
+
+    #[tokio::test]
+    async fn legacy_fuel_metadata_does_not_limit_execution() {
+        // Always terminate: an infinite-loop regression would hang once fuel is disabled.
+        let bytes = component(&format!("{} i32.const 0", "nop ".repeat(10_000)));
+        let directory = tempfile::tempdir().unwrap();
+        for legacy_setting in ["", "fuel = 0", "fuel = 1"] {
+            let tool = LoadedTool::load(&bytes, metadata(legacy_setting)).unwrap();
+            // A disabled engine has no fuel counter; this is not merely a large allowance.
+            let store = Store::new(&tool.engine, ());
+            assert!(store.get_fuel().is_err());
+            tool.run(&[], &Default::default(), directory.path(), directory.path())
+                .await
+                .unwrap();
+        }
     }
 }

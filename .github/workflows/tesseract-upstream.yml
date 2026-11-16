@@ -1,0 +1,95 @@
+name: Tesseract upstream tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      native_timeout:
+        description: Native timeout per upstream test executable, seconds
+        default: 600
+        type: number
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Full original native suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NATIVE_TIMEOUT: ${{ inputs.native_timeout }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install native test and font dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config g++ \
+            libpng-dev libjpeg-dev libtiff-dev libicu-dev libpango1.0-dev
+      - name: Run all original C++ test executables
+        run: python3 external_tools/tesseract/upstream_suite.py --timeout "$NATIVE_TIMEOUT"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tesseract-full-native-tests
+          path: |
+            external_tools/tesseract/target/upstream-suite/summary.json
+            external_tools/tesseract/target/upstream-suite/inventory.json
+            external_tools/tesseract/target/upstream-suite/ctest.xml
+            external_tools/tesseract/target/upstream-suite/ctest.log
+            external_tools/tesseract/target/upstream-suite/build.log
+            external_tools/tesseract/target/upstream-suite/gtest/
+          if-no-files-found: warn
+
+  wasi:
+    name: Original WASI core tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            sat -> target
+            external_tools/tesseract -> target
+      - name: Install SDK build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Install pinned WASI SDK 34
+        env:
+          SDK_SHA256: b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
+        run: |
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/wasi-sdk.tar.gz" \
+            https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz
+          echo "$SDK_SHA256  $RUNNER_TEMP/wasi-sdk.tar.gz" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/wasi-sdk.tar.gz" --directory "$RUNNER_TEMP"
+          echo "WASI_SDK_PATH=$RUNNER_TEMP/wasi-sdk-34.0-x86_64-linux" >> "$GITHUB_ENV"
+      - name: Build SAT and the production WASI OCR libraries
+        run: |
+          rustup target add wasm32-wasip2
+          cargo build --locked --release --manifest-path sat/Cargo.toml
+          bash external_tools/tesseract/package.sh tar
+      - name: Run original core assertions inside isolated SAT components
+        run: python3 external_tools/tesseract/upstream_wasi.py --sat sat/target/release/sat
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tesseract-original-wasi-tests
+          path: |
+            external_tools/tesseract/target/upstream-wasi/summary.json
+            external_tools/tesseract/target/upstream-wasi/*.log
+            external_tools/tesseract/target/upstream-wasi/xml/
+          if-no-files-found: warn

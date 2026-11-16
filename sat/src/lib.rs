@@ -1,6 +1,7 @@
 //! SAT: native host for archive-registered WebAssembly components.
 
 pub mod access;
+pub mod browser;
 
 pub mod cli;
 

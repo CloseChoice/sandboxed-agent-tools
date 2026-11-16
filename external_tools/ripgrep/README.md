@@ -21,6 +21,6 @@ and context lines. Repeated `--paths` select roots. Use absolute paths explicitl
 no host working directory is inherited. `--format json` returns structured
 results. `--max-results` bounds returned lines, including context.
 
-All execution is bounded by the host fuel ceiling. Package metadata can lower
-the budget but cannot increase it. No host environment or network authority is
+SAT runs with fuel metering disabled. Legacy package `fuel` values are
+accepted for compatibility and ignored. No host environment or network authority is
 inherited.

@@ -25,6 +25,6 @@ stdio adapter is specific to the upstream coreutils interface; other tools
 return their results through WIT. `--json` before the utility name encodes the
 captured UTF-8 output as a JSON string. Unsupported commands fail explicitly.
 
-All execution is bounded by the host fuel ceiling. Package metadata can lower
-the budget but cannot increase it. No host environment or network authority is
+SAT runs with fuel metering disabled. Legacy package `fuel` values are
+accepted for compatibility and ignored. No host environment or network authority is
 inherited.

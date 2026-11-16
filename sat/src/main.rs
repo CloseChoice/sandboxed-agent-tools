@@ -26,6 +26,13 @@ async fn run() -> Result<()> {
     let home = config::home()?;
     let cwd = std::env::current_dir()?;
     match cli.command {
+        Action::ChromeSession {
+            chrome,
+            headed,
+            duration,
+        } => {
+            sandboxed_agent_tools::browser::serve(chrome, headed, duration).await?;
+        }
         Action::Init { force } => {
             let path = config::project_config(&cwd);
             ensure!(

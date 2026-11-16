@@ -23,6 +23,18 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Action {
+    /// Run dedicated Chrome with a fresh temporary profile and a bounded optional duration.
+    ChromeSession {
+        /// Path to Chrome; otherwise search standard installation locations.
+        #[arg(long)]
+        chrome: Option<std::path::PathBuf>,
+        /// Display the browser window (headless by default).
+        #[arg(long)]
+        headed: bool,
+        /// Keep the session alive for this many seconds, even if stdin closes (for agents).
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..=3600))]
+        duration: Option<u64>,
+    },
     /// Create project configuration.
     Init {
         #[arg(short = 'f', long)]
@@ -48,6 +60,9 @@ pub enum Action {
 #[derive(Parser, Default)]
 #[command(name = "sat permissions", about = "Tool permissions")]
 struct Permissions {
+    /// Exact loopback CDP WebSocket endpoint; grants control of its Chrome instance.
+    #[arg(long, value_name = "WEBSOCKET_URL")]
+    allow_cdp: Option<String>,
     #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", value_name="PATH")]
     read: Option<Vec<String>>,
     #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", value_name="PATH")]
@@ -77,6 +92,7 @@ pub fn apply_permission_overrides(
                 "--deny-write",
                 "--allow-http",
                 "--deny-http",
+                "--allow-cdp",
             ]
             .iter()
             .any(|flag| next == flag || next.starts_with(&format!("{flag}=")))
@@ -87,6 +103,10 @@ pub fn apply_permission_overrides(
     let permissions = Permissions::try_parse_from(
         std::iter::once("permissions".into()).chain(args[separator + 1..].iter().cloned()),
     )?;
+    if let Some(endpoint) = permissions.allow_cdp {
+        crate::browser::validate_endpoint(&endpoint)?;
+        settings.cdp_endpoint = Some(endpoint);
+    }
 
     fn remove_empty_permission_values(v: Vec<String>) -> Vec<String> {
         v.into_iter().filter(|s| !s.is_empty()).collect()

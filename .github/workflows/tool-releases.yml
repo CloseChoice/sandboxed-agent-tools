@@ -58,13 +58,19 @@ jobs:
       matrix:
         tool:
           - brave-search
+          - browser
           - code
           - file-list
           - file-search
           - fuzzy-search
           - jaq
+          - markitdown
+          - patch
           - pdf-tools
+          - pdf-text
+          - python
           - ripgrep
+          - tesseract
           - uutils
     env:
       CARGO_TERM_COLOR: always
@@ -82,12 +88,13 @@ jobs:
           rustup show active-toolchain
           rustup target add wasm32-wasip2
       - uses: Swatinem/rust-cache@v2
+        if: matrix.tool != 'python' && matrix.tool != 'markitdown'
         with:
           workspaces: external_tools/${{ matrix.tool }} -> target
           key: tools-${{ matrix.tool }}-wasi-sdk-34
           save-if: ${{ github.event_name != 'pull_request' }}
-      - name: Install verified WASI SDK for Tree-sitter
-        if: matrix.tool == 'code'
+      - name: Install verified WASI SDK for C/C++ tools
+        if: matrix.tool == 'code' || matrix.tool == 'tesseract'
         env:
           SDK_SHA256: b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
         run: |
@@ -97,6 +104,9 @@ jobs:
           echo "$SDK_SHA256  $RUNNER_TEMP/wasi-sdk.tar.gz" | sha256sum --check
           tar --extract --gzip --file "$RUNNER_TEMP/wasi-sdk.tar.gz" --directory "$RUNNER_TEMP"
           echo "WASI_SDK_PATH=$RUNNER_TEMP/wasi-sdk-34.0-x86_64-linux" >> "$GITHUB_ENV"
+      - name: Check Python build-cache invalidation
+        if: matrix.tool == 'python'
+        run: python3 -m unittest discover -s external_tools/python -p 'test_build.py'
       - name: Build the installable WASI archive
         run: bash "external_tools/$TOOL/package.sh" tar
       - name: Verify archive contents and metadata
@@ -137,10 +147,98 @@ jobs:
         run: cargo build --locked --manifest-path sat/Cargo.toml
       - name: Check archives, register tools, and validate their entrypoints
         run: python3 external_tools/check_archives.py --complete --sat sat/target/debug/sat release-assets/*.tar
+      - name: Check patch CLI and filesystem boundaries
+        run: |
+          export SAT_HOME="$RUNNER_TEMP/patch-registry"
+          printf '[]\n[]\n[]\n[]\n[]\nunset\n' | sat/target/debug/sat register release-assets/patch.tar
+          cargo test --locked --manifest-path external_tools/patch/Cargo.toml
+          python3 external_tools/patch/test.py --sat sat/target/debug/sat
+          python3 external_tools/patch/test_upstream.py --sat sat/target/debug/sat
+      - name: Check Tesseract OCR parity and filesystem boundaries
+        run: |
+          export SAT_HOME="$RUNNER_TEMP/tesseract-registry"
+          printf '[]\n[]\n[]\n[]\n[]\nunset\n' | sat/target/debug/sat register release-assets/tesseract.tar
+          python3 external_tools/tesseract/build.py --native
+          python3 external_tools/tesseract/test.py --sat sat/target/debug/sat \
+            --output external_tools/tesseract/TEST_RESULTS.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: tesseract-test-results
+          path: external_tools/tesseract/TEST_RESULTS.json
+          if-no-files-found: warn
+      - name: Check PDF text extraction and sandbox boundaries
+        run: |
+          mkdir -p external_tools/pdf-text/dist
+          cp release-assets/pdf-text.tar external_tools/pdf-text/dist/pdf-text.tar
+          python3 external_tools/pdf-text/test.py --skip-build --sat sat/target/debug/sat
+      - name: Check original MarkItDown PDF and CLI tests
+        run: |
+          git init "$RUNNER_TEMP/markitdown-upstream"
+          git -C "$RUNNER_TEMP/markitdown-upstream" remote add origin https://github.com/microsoft/markitdown.git
+          git -C "$RUNNER_TEMP/markitdown-upstream" fetch --depth 1 origin ed178952a6672abdfd35b5f9e76a80b6cefc086e
+          git -C "$RUNNER_TEMP/markitdown-upstream" checkout --detach FETCH_HEAD
+          python3 -m venv "$RUNNER_TEMP/markitdown-native"
+          "$RUNNER_TEMP/markitdown-native/bin/python" -m pip install \
+            "$RUNNER_TEMP/markitdown-upstream/packages/markitdown[pdf]" pytest==9.2.0 \
+            pdfminer.six==20260107 pdfplumber==0.11.10 charset-normalizer==3.5.2
+          export SAT_HOME="$RUNNER_TEMP/markitdown-registry"
+          printf '[]\n[]\n[]\n[]\n[]\nunset\n' | sat/target/debug/sat register release-assets/markitdown.tar
+          "$RUNNER_TEMP/markitdown-native/bin/python" external_tools/markitdown/test_upstream.py \
+            --upstream "$RUNNER_TEMP/markitdown-upstream" \
+            --python "$RUNNER_TEMP/markitdown-native/bin/python" \
+            --sat "$PWD/sat/target/debug/sat" --output "$RUNNER_TEMP/markitdown-results"
+          "$RUNNER_TEMP/markitdown-native/bin/python" external_tools/markitdown/test_cli.py \
+            --python "$RUNNER_TEMP/markitdown-native/bin/python" --sat "$PWD/sat/target/debug/sat"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: markitdown-upstream-results
+          path: ${{ runner.temp }}/markitdown-results/
+          if-no-files-found: warn
+      - name: Check Python execution and sandbox boundaries
+        run: |
+          mkdir -p external_tools/python/dist
+          cp release-assets/python.tar external_tools/python/dist/python.tar
+          python3 external_tools/python/test.py --skip-build --sat sat/target/debug/sat
+
+  browser-integration:
+    name: Chrome + WASI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            sat -> target
+            external_tools/browser -> target
+          key: browser-integration
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Build and exercise Chrome through the WASI component
+        shell: bash
+        run: python3 external_tools/browser/test.py --artifacts external_tools/browser/dist/test-results
+      - name: Check host transport and permission boundaries
+        run: cargo test --locked --manifest-path sat/Cargo.toml
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: browser-results-${{ matrix.os }}
+          path: external_tools/browser/dist/test-results/
+          if-no-files-found: warn
 
   release:
     name: Publish tool archives
-    needs: validate
+    needs: [validate, browser-integration]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
