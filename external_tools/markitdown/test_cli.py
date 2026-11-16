@@ -7,6 +7,22 @@ import subprocess
 import tempfile
 
 
+
+def without_onnx_pci_warning(stderr):
+    # Native ONNX imports inspect runner hardware, even for --help. This specific
+    # diagnostic is not emitted by MarkItDown's CLI and has no WASI counterpart.
+    # Keep every other byte so actual CLI errors and other warnings still fail.
+    warning = re.compile(
+        rb'(?:\x1b\[[0-9;]*m)?[0-9:. -]+ '
+        rb'\[W:onnxruntime:Default, device_discovery\.cc:\d+ GetPciBusId\] '
+        rb'Skipping pci_bus_id for PCI path at "[^"\r\n]+" because filename '
+        rb'"[^"\r\n]+" did not match expected pattern of [^\r\n]+'
+        rb'(?:\x1b\[m)?\r?\n?'
+    )
+    return b''.join(line for line in stderr.splitlines(keepends=True)
+                    if not warning.fullmatch(line))
+
+
 def small_pdf():
     content = b'BT /F1 12 Tf 72 720 Td (Hello from MarkItDown) Tj ET'
     objects = [b'<< /Type /Catalog /Pages 2 0 R >>',
@@ -60,7 +76,7 @@ def check(python, sat):
                 assert native.stdout == wasi.stdout, (args, native.stdout, wasi.stdout)
             # The logger appends an instrumentation report after child stderr.
             child_stderr = wasi.stderr.split(b'SAT FAILED (exit ', 1)[0]
-            assert native.stderr == child_stderr, (args, native.stderr, child_stderr)
+            assert without_onnx_pci_warning(native.stderr) == child_stderr, (args, native.stderr, child_stderr)
         for args, data, grants in [([source], None, ['--read', source]),
                                    (['sample.pdf'], None, ['--read', source]),
                                    ([], source.read_bytes(), []),
