@@ -180,7 +180,7 @@ jobs:
           cp release-assets/python.tar external_tools/python/dist/python.tar
           python3 external_tools/python/test.py --skip-build --sat sat/target/debug/sat
 
-  build-host:
+  build-sat:
     name: SAT host (${{ matrix.target }})
     needs: [versions, build]
     runs-on: ${{ matrix.os }}
@@ -238,7 +238,7 @@ jobs:
 
   assemble:
     name: Assemble and verify release downloads
-    needs: [validate, build-host]
+    needs: [validate, build-sat]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
