@@ -2,6 +2,7 @@
 import argparse
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import tarfile
@@ -47,12 +48,14 @@ def check_registration(sat, archives):
     # Separate test registry/project, empty grants, and no provider API calls.
     with tempfile.TemporaryDirectory(prefix='sat-release-check-') as temporary:
         project = Path(temporary)
-        env = dict(os.environ, SAT_HOME=str(project / 'registry'))
+        env = dict(os.environ, SAT_HOME=str(project / 'registry'), SAT_BINARY=str(sat))
+        logger = Path.home() / '.codex/skills/sat/scripts/run_sat.py'
+        prefix = [sys.executable, str(logger), '--'] if logger.exists() else [str(sat)]
         for archive in archives:
             print(f'Registering and compiling {archive.name} with SAT...', flush=True)
             commands = [
-                ([str(sat), 'register', str(archive.resolve())], b'[]\n' * 5 + b'unset\n'),
-                ([str(sat), archive.stem, '--help'], b''),
+                ([*prefix, 'register', str(archive.resolve())], b'[]\n' * 5 + b'unset\n'),
+                ([*prefix, archive.stem, '--help'], b''),
             ]
             for command, input_bytes in commands:
                 result = subprocess.run(command, cwd=project, env=env, input=input_bytes,
@@ -64,13 +67,18 @@ def check_registration(sat, archives):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--complete', action='store_true', help='Require every packaged tool exactly once')
+    parser.add_argument('--complete', action='store_true', help='Require exactly the selected release tools')
     parser.add_argument('--sat', type=Path, help='Also register each archive and check its CLI help with this SAT binary')
     parser.add_argument('archives', nargs='+', type=Path)
     args = parser.parse_args()
     tools = tool_directories()
     if args.complete:
-        expected = {f'{name}.tar' for name in tools}
+        selection = tomllib.loads((ROOT / 'release-tools.toml').read_text())['tools']
+        if not isinstance(selection, list) or not selection or any(not isinstance(n, str) for n in selection):
+            parser.error('release selection must be a nonempty list of tool names')
+        if len(set(selection)) != len(selection) or any(name not in tools for name in selection):
+            parser.error('release selection contains duplicate or unknown tools')
+        expected = {f'{name}.tar' for name in selection}
         actual = {p.name for p in args.archives}
         if len(args.archives) != len(expected) or actual != expected:
             parser.error(f'incomplete release: missing={sorted(expected - actual)}, unexpected={sorted(actual - expected)}')

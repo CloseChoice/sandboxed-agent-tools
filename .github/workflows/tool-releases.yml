@@ -31,17 +31,22 @@ jobs:
     name: Check release versions
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      tools: ${{ steps.selection.outputs.tools }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
-      - name: Test release synchronization and tagging
+          python-version: '3.13'
+      - name: Test release selection and versions
         run: python3 -m unittest discover -s scripts -p 'test_release.py'
       - name: Check Cargo, lockfile, and tool metadata versions
         run: python3 scripts/release.py
+      - name: Select release tools
+        id: selection
+        run: echo "tools=$(python3 scripts/release.py --matrix)" >> "$GITHUB_OUTPUT"
       - name: Require the pushed tag to match the bundle version
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
@@ -56,22 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool:
-          - brave-search
-          - browser
-          - code
-          - file-list
-          - file-search
-          - fuzzy-search
-          - jaq
-          - markitdown
-          - patch
-          - pdf-tools
-          - pdf-text
-          - python
-          - ripgrep
-          - tesseract
-          - uutils
+        tool: ${{ fromJSON(needs.versions.outputs.tools) }}
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: '0'
@@ -94,7 +84,7 @@ jobs:
           key: tools-${{ matrix.tool }}-wasi-sdk-34
           save-if: ${{ github.event_name != 'pull_request' }}
       - name: Install verified WASI SDK for C/C++ tools
-        if: matrix.tool == 'code' || matrix.tool == 'tesseract'
+        if: matrix.tool == 'code'
         env:
           SDK_SHA256: b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
         run: |
@@ -147,31 +137,16 @@ jobs:
         run: cargo build --locked --manifest-path sat/Cargo.toml
       - name: Check archives, register tools, and validate their entrypoints
         run: python3 external_tools/check_archives.py --complete --sat sat/target/debug/sat release-assets/*.tar
-      - name: Check patch CLI and filesystem boundaries
+      - name: Check host capability boundaries and process exit handling
+        run: cargo test --locked --manifest-path sat/Cargo.toml
+      - name: Check code and jaq execution and filesystem boundaries
         run: |
-          export SAT_HOME="$RUNNER_TEMP/patch-registry"
-          printf '[]\n[]\n[]\n[]\n[]\nunset\n' | sat/target/debug/sat register release-assets/patch.tar
-          cargo test --locked --manifest-path external_tools/patch/Cargo.toml
-          python3 external_tools/patch/test.py --sat sat/target/debug/sat
-          python3 external_tools/patch/test_upstream.py --sat sat/target/debug/sat
-      - name: Check Tesseract OCR parity and filesystem boundaries
-        run: |
-          export SAT_HOME="$RUNNER_TEMP/tesseract-registry"
-          printf '[]\n[]\n[]\n[]\n[]\nunset\n' | sat/target/debug/sat register release-assets/tesseract.tar
-          python3 external_tools/tesseract/build.py --native
-          python3 external_tools/tesseract/test.py --sat sat/target/debug/sat \
-            --output external_tools/tesseract/TEST_RESULTS.json
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: tesseract-test-results
-          path: external_tools/tesseract/TEST_RESULTS.json
-          if-no-files-found: warn
-      - name: Check PDF text extraction and sandbox boundaries
-        run: |
-          mkdir -p external_tools/pdf-text/dist
-          cp release-assets/pdf-text.tar external_tools/pdf-text/dist/pdf-text.tar
-          python3 external_tools/pdf-text/test.py --skip-build --sat sat/target/debug/sat
+          mkdir -p external_tools/code/dist external_tools/jaq/dist
+          cp release-assets/code.tar external_tools/code/dist/code.tar
+          cp release-assets/jaq.tar external_tools/jaq/dist/jaq.tar
+          cargo build --locked --release --manifest-path external_tools/jaq/Cargo.toml --bin jaq-native
+          python3 external_tools/test_imported_tools.py --skip-build
+          python3 external_tools/code/test_selectors.py --sat sat/target/debug/sat
       - name: Check original MarkItDown PDF and CLI tests
         run: |
           git init "$RUNNER_TEMP/markitdown-upstream"
@@ -202,43 +177,9 @@ jobs:
           cp release-assets/python.tar external_tools/python/dist/python.tar
           python3 external_tools/python/test.py --skip-build --sat sat/target/debug/sat
 
-  browser-integration:
-    name: Chrome + WASI (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            sat -> target
-            external_tools/browser -> target
-          key: browser-integration
-          save-if: ${{ github.event_name != 'pull_request' }}
-      - name: Build and exercise Chrome through the WASI component
-        shell: bash
-        run: python3 external_tools/browser/test.py --artifacts external_tools/browser/dist/test-results
-      - name: Check host transport and permission boundaries
-        run: cargo test --locked --manifest-path sat/Cargo.toml
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: browser-results-${{ matrix.os }}
-          path: external_tools/browser/dist/test-results/
-          if-no-files-found: warn
-
   release:
     name: Publish tool archives
-    needs: [validate, browser-integration]
+    needs: validate
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

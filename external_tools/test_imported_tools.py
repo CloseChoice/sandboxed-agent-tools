@@ -4,11 +4,14 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SAT = ROOT / 'sat/target/debug' / ('sat.exe' if os.name == 'nt' else 'sat')
-TOOLS = ['code', 'jaq', 'pdf-tools', 'ripgrep', 'uutils']
+LOGGER = Path.home() / '.codex/skills/sat/scripts/run_sat.py'
+SAT_COMMAND = [sys.executable, str(LOGGER), '--'] if LOGGER.exists() else [str(SAT)]
+TOOLS = ['code', 'jaq']
 
 
 def check(name, build=True):
@@ -23,10 +26,10 @@ def check(name, build=True):
         subprocess.run(['cargo', 'build', '--locked', '--manifest-path', str(ROOT / 'sat/Cargo.toml')], check=True)
     with tempfile.TemporaryDirectory(prefix='sat-import-') as temporary:
         base = Path(temporary)
-        env = dict(os.environ, SAT_HOME=str(base / 'registry'), SAT_TEST_SECRET='unrelated-host-secret')
+        env = dict(os.environ, SAT_HOME=str(base / 'registry'), SAT_TEST_SECRET='unrelated-host-secret', SAT_BINARY=str(SAT))
 
         def invoke(*args, input=None, ok=True):
-            result = subprocess.run([str(SAT), *map(str, args)], cwd=base, env=env,
+            result = subprocess.run([*SAT_COMMAND, *map(str, args)], cwd=base, env=env,
                                     input=input, capture_output=True, timeout=180)
             assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
             assert b'unrelated-host-secret' not in result.stdout + result.stderr
@@ -61,7 +64,7 @@ def check(name, build=True):
             # Searchers may report an inaccessible root as an empty result.
             for denied in [source, outside]:
                 grants = [] if denied == source else ['--', '--read', source]
-                result = subprocess.run([str(SAT), command, *args, '--paths', str(denied), *map(str, grants)], cwd=base, env=env, capture_output=True, timeout=180)
+                result = subprocess.run([*SAT_COMMAND, command, *args, '--paths', str(denied), *map(str, grants)], cwd=base, env=env, capture_output=True, timeout=180)
                 assert b'def secret' not in result.stdout and b'def hello' not in result.stdout
                 assert b'outside_secret' not in result.stdout and b'needle' not in result.stdout
             assert (b'hello' if name == 'code' else b'needle') in invoke(command, *args, '--paths', source, '--paths', source, '--', '--read', source).stdout
@@ -85,7 +88,7 @@ def check(name, build=True):
                 args = [command, 'cat', link]
             else:
                 args = [command, *(['outline'] if name == 'code' else ['outside_secret']), '--paths', link]
-            result = subprocess.run([str(SAT), *map(str, args), '--', '--read', str(source)], cwd=base, env=env, capture_output=True, timeout=180)
+            result = subprocess.run([*SAT_COMMAND, *map(str, args), '--', '--read', str(source)], cwd=base, env=env, capture_output=True, timeout=180)
             assert b'outside_secret' not in result.stdout
     print(f'{name}: archive, execution, and confinement checks passed')
 

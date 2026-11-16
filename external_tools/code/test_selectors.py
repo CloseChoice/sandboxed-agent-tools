@@ -1,4 +1,5 @@
 """WASI selector and confinement checks; every SAT command uses the logging skill."""
+import argparse
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ ROOT = TOOL.parents[1]
 WRAPPER = Path.home() / '.codex/skills/sat/scripts/run_sat.py'
 
 
-def check():
+def check(sat=None):
     with tempfile.TemporaryDirectory(prefix='sat-code-selectors-') as tmp:
         base = Path(tmp)
         project = base / 'project'
@@ -35,6 +36,8 @@ def check():
         (src / 'escape.ts').symlink_to(secret)
         (src / 'escape-dir').symlink_to(base, target_is_directory=True)
         env = dict(os.environ, SAT_HOME=str(base / 'registry'))
+        if sat is not None:
+            env['SAT_BINARY'] = str(sat)
         calls = 0
         failures = []
 
@@ -42,7 +45,7 @@ def check():
             nonlocal calls
             calls += 1
             result = subprocess.run(
-                [sys.executable, str(WRAPPER), '--', *map(str, args)],
+                [*([sys.executable, str(WRAPPER), '--'] if WRAPPER.exists() else [str(sat)]), *map(str, args)],
                 input=stdin, capture_output=True, env=env, cwd=base, timeout=180,
             )
             if result.returncode:
@@ -88,4 +91,6 @@ def check():
 
 
 if __name__ == '__main__':
-    check()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--sat', type=Path, default=ROOT / 'sat/target/debug/sat')
+    check(parser.parse_args().sat.resolve())

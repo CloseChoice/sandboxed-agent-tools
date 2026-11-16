@@ -8,6 +8,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = Path(__file__).resolve().parent
 SAT = ROOT / 'sat/target/debug' / ('sat.exe' if os.name == 'nt' else 'sat')
+LOGGER = Path.home() / '.codex/skills/sat/scripts/run_sat.py'
+SAT_COMMAND = [sys.executable, str(LOGGER), '--'] if LOGGER.exists() else [str(SAT)]
 NATIVE = TOOL / 'target/release' / ('jaq-native.exe' if os.name == 'nt' else 'jaq-native')
 
 
@@ -18,11 +20,11 @@ def check(build=True):
         subprocess.run(['cargo', 'build', '--locked', '--release', '--manifest-path', str(TOOL / 'Cargo.toml'), '--bin', 'jaq-native'], check=True)
     with tempfile.TemporaryDirectory(prefix='sat-jaq-cli-') as temporary:
         base = Path(temporary)
-        env = dict(os.environ, SAT_HOME=str(TOOL / 'target/test-registry'), SAT_TEST_SECRET='host-secret')
+        env = dict(os.environ, SAT_HOME=str(TOOL / 'target/test-registry'), SAT_TEST_SECRET='host-secret', SAT_BINARY=str(SAT))
         def sat(args, data=b'', grants=()):
-            return subprocess.run([str(SAT), 'jaq', *args, *(['--', *grants] if grants else [])],
+            return subprocess.run([*SAT_COMMAND, 'jaq', *args, *(['--', *grants] if grants else [])],
                                   input=data, cwd=base, env=env, capture_output=True, timeout=180)
-        registered = subprocess.run([str(SAT), 'register', '--force', str(TOOL / 'dist/jaq.tar')],
+        registered = subprocess.run([*SAT_COMMAND, 'register', '--force', str(TOOL / 'dist/jaq.tar')],
                                     input=b'y\n' * 6, cwd=base, env=env, capture_output=True, timeout=180)
         assert registered.returncode == 0, registered.stderr
         print('jaq: registered and compiled', flush=True)
