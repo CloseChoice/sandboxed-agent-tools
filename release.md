@@ -8,6 +8,7 @@ The development checkpoint is preserved on `new-architecture`. The
 - jaq: the upstream jq-compatible CLI.
 - code: Tree-sitter retrieval for Python, Rust, JavaScript, and TypeScript/TSX.
 - MarkItDown: the local PDF conversion profile, without OCR or remote backends.
+- ripgrep: text search using upstream ripgrep libraries through SAT's CLI.
 
 Other tool sources remain available for development and are excluded from
 the release build matrix, complete archive checks, and published assets.
@@ -37,7 +38,7 @@ component. This checks the artifact users download, including executable modes.
 
 Unix hosts use `sat-<version>-<target>.tar.gz`; Windows uses
 `sat-<version>-<target>.zip` containing `sat.exe`. Extract the matching
-archive and place the executable on PATH. The four tool archives remain portable
+archive and place the executable on PATH. The five tool archives remain portable
 across these hosts. The release checksum file covers host and tool archives.
 Publishing requires both package validation and all native host jobs to pass.
 Branch runs assemble the same complete release bundle, verify checksums, and

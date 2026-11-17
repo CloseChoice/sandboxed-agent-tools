@@ -72,3 +72,14 @@ Run the deterministic local-server checks, including denied hosts and redirects:
 ```sh
 python3 external_tools/python/test_http.py --sat sat/target/release/sat
 ```
+
+## Upstream credits and license
+
+Built on [CPython](https://github.com/python/cpython), maintained by the Python
+core team and community, and [componentize-py](https://github.com/bytecodealliance/componentize-py)
+from the Bytecode Alliance. CPython uses the PSF License Version 2 with retained
+historical license notices; componentize-py uses Apache-2.0 WITH LLVM-exception.
+See [Python's license documentation](https://docs.python.org/3.14/license.html)
+and [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) for the retained texts.
+SAT adds the restricted standard-library profile, CLI wrapper, and WASI HTTP
+adapter described above.

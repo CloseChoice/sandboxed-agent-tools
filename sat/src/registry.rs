@@ -1,4 +1,4 @@
-//! Three-file registry; archives are data and are never executed at registration.
+//! Tool registry; archives are data and are never executed at registration.
 
 use crate::{
     config::{self, Configuration, ToolSettings},
@@ -14,6 +14,7 @@ use std::{
 };
 
 const REQUIRED_PACKAGE_FILES: [&str; 3] = ["tool.wasm", "tool.toml", "defaults.toml"];
+const OPTIONAL_PACKAGE_FILES: [&str; 1] = ["THIRD_PARTY_NOTICES.txt"];
 
 pub fn registered_tool_names(home: &Path) -> Result<Vec<String>> {
     let root = home.join("tools");
@@ -79,7 +80,9 @@ pub fn extract(path: &Path, zip: bool, destination: &Path) -> Result<()> {
         let mut archive = zip::ZipArchive::new(fs::File::open(path)?)?;
         for i in 0..archive.len() {
             let entry = archive.by_index(i)?;
-            if REQUIRED_PACKAGE_FILES.contains(&entry.name()) {
+            if REQUIRED_PACKAGE_FILES.contains(&entry.name())
+                || OPTIONAL_PACKAGE_FILES.contains(&entry.name())
+            {
                 let mode = entry.unix_mode().unwrap_or(0o100644) & 0o170000;
                 ensure!(
                     !entry.is_dir() && (mode == 0 || mode == 0o100000),
@@ -96,6 +99,7 @@ pub fn extract(path: &Path, zip: bool, destination: &Path) -> Result<()> {
             let name = entry.path_bytes();
             if let Some(expected) = REQUIRED_PACKAGE_FILES
                 .iter()
+                .chain(OPTIONAL_PACKAGE_FILES.iter())
                 .find(|n| n.as_bytes() == name.as_ref())
             {
                 ensure!(
@@ -367,6 +371,12 @@ pub async fn register(
     for file in REQUIRED_PACKAGE_FILES {
         fs::copy(temporary.path().join(file), staged_tool.join(file))?;
     }
+    for file in OPTIONAL_PACKAGE_FILES {
+        let source = temporary.path().join(file);
+        if source.try_exists()? {
+            fs::copy(source, staged_tool.join(file))?;
+        }
+    }
     let backup = stage.path().join("old");
     let existed = destination.try_exists()?;
     if existed {
@@ -473,5 +483,68 @@ mod compilation_tests {
         tool.run(&[], &ToolSettings::default(), &home, &cwd)
             .await
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::*;
+
+    #[test]
+    fn retains_notices_from_tar_and_zip() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let files = [
+            ("tool.wasm", b"component".as_slice()),
+            ("tool.toml", b"metadata".as_slice()),
+            ("defaults.toml", b"defaults".as_slice()),
+            (
+                "THIRD_PARTY_NOTICES.txt",
+                b"upstream copyright and license".as_slice(),
+            ),
+        ];
+        let tar_path = temp.path().join("tool.tar");
+        let mut tar = tar::Builder::new(fs::File::create(&tar_path)?);
+        for (name, data) in files {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(data.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            tar.append_data(&mut header, name, data)?;
+        }
+        tar.finish()?;
+        let zip_path = temp.path().join("tool.zip");
+        let mut zip = zip::ZipWriter::new(fs::File::create(&zip_path)?);
+        for (name, data) in files {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())?;
+            zip.write_all(data)?;
+        }
+        zip.finish()?;
+        for (path, is_zip) in [(tar_path, false), (zip_path, true)] {
+            let destination = tempfile::tempdir()?;
+            extract(&path, is_zip, destination.path())?;
+            for (name, data) in files {
+                assert_eq!(fs::read(destination.path().join(name))?, data);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_linked_notice_file() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("tool.tar");
+        let mut tar = tar::Builder::new(fs::File::create(&path)?);
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Symlink);
+        header.set_size(0);
+        header.set_mode(0o777);
+        header.set_link_name("/outside")?;
+        header.set_cksum();
+        tar.append_data(&mut header, "THIRD_PARTY_NOTICES.txt", std::io::empty())?;
+        tar.finish()?;
+        let destination = tempfile::tempdir()?;
+        assert!(extract(&path, false, destination.path()).is_err());
+        assert!(!destination.path().join("THIRD_PARTY_NOTICES.txt").exists());
+        Ok(())
     }
 }

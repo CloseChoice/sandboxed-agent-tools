@@ -52,3 +52,11 @@ python3 external_tools/jaq/test.py --skip-build
 The checks compare output, diagnostics, and exit statuses for upstream examples,
 flags, positional files, stdin, bindings, modules, formats, and error cases, then
 verify denied reads and symlink isolation.
+
+## Upstream credits and license
+
+[jaq](https://github.com/01mf02/jaq) is developed by Michael Färber and its
+contributors. The vendored source is used under its
+[MIT license](upstream/LICENSE-MIT); the retained text is also distributed in
+[THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). SAT supplies the WASI adapter;
+the upstream CLI and evaluator remain jaq's work.

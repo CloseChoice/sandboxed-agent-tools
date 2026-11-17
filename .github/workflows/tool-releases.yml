@@ -146,11 +146,12 @@ jobs:
         run: python3 external_tools/check_archives.py --complete --sat sat/target/debug/sat release-assets/*.tar
       - name: Check host capability boundaries and process exit handling
         run: cargo test --locked --manifest-path sat/Cargo.toml
-      - name: Check code and jaq execution and filesystem boundaries
+      - name: Check code, jaq, and ripgrep execution and filesystem boundaries
         run: |
-          mkdir -p external_tools/code/dist external_tools/jaq/dist
+          mkdir -p external_tools/code/dist external_tools/jaq/dist external_tools/ripgrep/dist
           cp release-assets/code.tar external_tools/code/dist/code.tar
           cp release-assets/jaq.tar external_tools/jaq/dist/jaq.tar
+          cp release-assets/ripgrep.tar external_tools/ripgrep/dist/ripgrep.tar
           cargo build --locked --release --manifest-path external_tools/jaq/Cargo.toml --bin jaq-native
           python3 external_tools/test_imported_tools.py --skip-build
           python3 external_tools/code/test_selectors.py --sat sat/target/debug/sat

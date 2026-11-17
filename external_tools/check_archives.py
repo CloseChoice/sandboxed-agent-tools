@@ -28,12 +28,18 @@ def check_archive(path, tools):
     directory = tools.get(path.stem)
     if directory is None or path.suffix != '.tar':
         raise ValueError(f'unknown tool archive: {path.name}')
+    expected_files = set(PACKAGE_FILES)
+    notices = directory / 'THIRD_PARTY_NOTICES.txt'
+    if notices.is_file():
+        expected_files.add(notices.name)
     with tarfile.open(path, 'r:') as archive:
         members = archive.getmembers()
-        if len(members) != len(PACKAGE_FILES) or {m.name for m in members} != PACKAGE_FILES:
-            raise ValueError(f'{path.name}: expected exactly {sorted(PACKAGE_FILES)}')
+        if len(members) != len(expected_files) or {m.name for m in members} != expected_files:
+            raise ValueError(f'{path.name}: expected exactly {sorted(expected_files)}')
         if not all(member.isfile() for member in members):
             raise ValueError(f'{path.name}: package entries must be regular files')
+        if notices.is_file() and archive.extractfile(notices.name).read() != notices.read_bytes():
+            raise ValueError(f'{path.name}: upstream notices differ from the release source')
         for name in ['tool.toml', 'defaults.toml']:
             data = archive.extractfile(name).read()
             tomllib.loads(data.decode('utf-8'))

@@ -22,6 +22,7 @@ struct Output {
     // Conservative: true means a limit stopped the search, even if there were
     // no further matches. It never claims an incomplete search is complete.
     truncated: bool,
+    skipped_paths: usize,
     #[serde(skip)]
     text_bytes: usize,
 }
@@ -45,6 +46,14 @@ impl Output {
         }
         if self.truncated {
             text.push_str("[results truncated; increase --max-results or narrow the search]\n");
+        }
+        if self.skipped_paths > 0 {
+            writeln!(
+                text,
+                "[skipped {} paths: permission denied]",
+                self.skipped_paths
+            )
+            .unwrap();
         }
         // SAT supplies the final newline when presenting a WIT string.
         if text.ends_with('\n') {
@@ -159,9 +168,20 @@ impl Guest for Ripgrep {
             .build();
         let mut output = Output::default();
         for entry in walker.build() {
-            // Errors deliberately omit OS error strings, which may contain
-            // host paths. Fail the whole call instead of hiding denied reads.
-            let entry = entry.map_err(|_| "cannot traverse search path (missing or denied)")?;
+            // Omit OS error strings, which may contain host paths. Permission
+            // denials skip only the affected entry; unrelated traversal errors fail.
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error)
+                    if error
+                        .io_error()
+                        .is_some_and(|error| error.kind() == io::ErrorKind::PermissionDenied) =>
+                {
+                    output.skipped_paths += 1;
+                    continue;
+                }
+                Err(_) => return Err("cannot traverse search path (missing or denied)".into()),
+            };
             if entry.error().is_some() {
                 return Err("cannot read ignore rules".into());
             }
@@ -173,8 +193,15 @@ impl Guest for Ripgrep {
             }
             // Explicit symlink inputs can be followed by the WASI filesystem;
             // the host still confines their targets to the granted roots.
-            if !entry.path().is_file() {
-                return Err("search path is not an accessible regular file".into());
+            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+                match std::fs::metadata(entry.path()) {
+                    Ok(metadata) if metadata.is_file() => {}
+                    Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                        output.skipped_paths += 1;
+                        continue;
+                    }
+                    _ => return Err("search path is not an accessible regular file".into()),
+                }
             }
             let path = entry.path().to_string_lossy();
             let sink = Collector {
@@ -182,9 +209,18 @@ impl Guest for Ripgrep {
                 path: &path,
                 limit: max_results as usize,
             };
-            searcher.search_path(&matcher, entry.path(), sink).map_err(
-                |_| "cannot search file (missing, denied, or line exceeds buffer limit)",
-            )?;
+            match searcher.search_path(&matcher, entry.path(), sink) {
+                Ok(()) => {}
+                // The host rejects hard-linked files as well as other denied reads.
+                // Keep searching readable files without weakening that protection.
+                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                    output.skipped_paths += 1;
+                    continue;
+                }
+                Err(_) => {
+                    return Err("cannot search file (missing or line exceeds buffer limit)".into());
+                }
+            }
             if output.truncated {
                 break;
             }

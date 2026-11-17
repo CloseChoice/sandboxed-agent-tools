@@ -110,3 +110,16 @@ conversion output match natively.
 The [previous limited-fuel run](UPSTREAM_RESULTS_LIMITED.json) is preserved as
 history: 25 cases exhausted the old fuel ceiling. With metering disabled those
 same unchanged assertions pass. Legacy package `fuel` metadata is ignored.
+
+## Upstream credits and licenses
+
+[MarkItDown](https://github.com/microsoft/markitdown) is developed by Microsoft
+and its contributors under the [MIT license](upstream/LICENSE).
+This profile also uses [pdfminer.six](https://github.com/pdfminer/pdfminer.six),
+[pdfplumber](https://github.com/jsvine/pdfplumber), and
+[charset-normalizer](https://github.com/jawah/charset_normalizer), each under MIT.
+Thanks to their authors and maintainers. The Python runtime comes from
+[CPython](https://github.com/python/cpython) via
+[componentize-py](https://github.com/bytecodealliance/componentize-py).
+Their license texts and notices are retained in
+[THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).

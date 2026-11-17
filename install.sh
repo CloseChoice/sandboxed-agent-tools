@@ -25,7 +25,7 @@ while [[ $# -gt 0 ]]; do
             shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --*) fail "unknown option: $1" ;;
-        default-tools) tools+=(python jaq code markitdown); shift ;;
+        default-tools) tools+=(python jaq code markitdown ripgrep); shift ;;
         *)
             IFS=',' read -r -a selected <<< "$1"
             tools+=("${selected[@]}")
@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
 done
 for tool in "${tools[@]-}"; do
     [[ -n "$tool" ]] || continue
-    case "$tool" in python|jaq|code|markitdown) ;; *) fail "unknown tool: $tool" ;; esac
+    case "$tool" in python|jaq|code|markitdown|ripgrep) ;; *) fail "unknown tool: $tool" ;; esac
 done
 
 if [[ -z "$platform" ]]; then

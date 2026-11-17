@@ -11,12 +11,12 @@ $repo = "https://github.com/CloseChoice/sandboxed-agent-tools"
 $target = "x86_64-pc-windows-msvc"
 $selected = @()
 if ($Tools -eq "default-tools") {
-    $selected = @("python", "jaq", "code", "markitdown")
+    $selected = @("python", "jaq", "code", "markitdown", "ripgrep")
 } elseif ($Tools) {
     $selected = @($Tools.Split(","))
 }
 foreach ($tool in $selected) {
-    if ($tool -notin @("python", "jaq", "code", "markitdown")) {
+    if ($tool -notin @("python", "jaq", "code", "markitdown", "ripgrep")) {
         throw "Unknown tool: $tool"
     }
 }

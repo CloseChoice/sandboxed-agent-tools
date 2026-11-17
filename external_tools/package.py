@@ -15,6 +15,9 @@ def package(tool_dir, component, archive_format):
         "tool.toml": (tool_dir / "tool.toml").read_bytes(),
         "defaults.toml": (tool_dir / "defaults.toml").read_bytes(),
     }
+    notices = tool_dir / "THIRD_PARTY_NOTICES.txt"
+    if notices.is_file():
+        files[notices.name] = notices.read_bytes()
     if not files["tool.wasm"].startswith(b"\0asm\x0d\0\x01\0"):
         raise ValueError("tool.wasm must be a WebAssembly component")
     destination = tool_dir / "dist" / (metadata["name"] + "." + archive_format)

@@ -59,3 +59,15 @@ sat code outline --path 'regex:/project/src::(^|/)[^/]+\.(ts|tsx)$' --exclude no
 - Use absolute selector roots in SAT. Patterns grant no permissions: explicitly
   grant traversal roots with `--read` after `--`. Traversal outside those grants
   is denied. `read-enclosing` still requires a single literal file.
+
+## Upstream credits and licenses
+
+This SAT tool builds on [Tree-sitter](https://github.com/tree-sitter/tree-sitter)
+by Max Brunsfeld and its contributors, with the upstream
+[Python](https://github.com/tree-sitter/tree-sitter-python),
+[Rust](https://github.com/tree-sitter/tree-sitter-rust),
+[JavaScript](https://github.com/tree-sitter/tree-sitter-javascript), and
+[TypeScript/TSX](https://github.com/tree-sitter/tree-sitter-typescript) grammars.
+The runtime and these grammars use MIT licenses, with their respective copyright
+notices retained in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+The search/retrieval interface is SAT's own.

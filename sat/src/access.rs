@@ -239,7 +239,8 @@ pub fn check_file(file: &std::fs::File) -> std::io::Result<()> {
     if !meta.is_file() {
         return Err(std::io::ErrorKind::PermissionDenied.into());
     }
-    // Hardlinks alias inode contents and could bypass a path-based exclusion.
+    // Reject files with multiple hard-linked names: another name could
+    // refer to the same file outside the permitted paths.
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;

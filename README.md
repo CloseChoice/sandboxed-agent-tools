@@ -1,12 +1,15 @@
 # Sandboxed Agent Tools (SAT)
 
+**This is an early version of what SAT should become one day. Feel free to explore and give feedback. Please don't treat 
+this project as production ready and feature complete.**
+
 SAT provides sandboxing your tools. It provides capabilities to allow read and write to files and http calls on a per-tool-call basis.
-SAT uses the Webassembly System Interface (WASI) for sandboxing. This means we rely on proven architecture and just provide the glue
-to make sandboxing for tools work.
-Currently there are 4 tools available
+SAT uses [Wasmtime](https://wasmtime.dev/) to run tools compiled to the Webassembly System Interface (WASI) for sandboxing. This means we rely on proven architecture and just provide the glue
+to make sandboxing per tool-call work.
+Currently there are 5 tools available
 
 SAT is a native host that runs WebAssembly tools with explicit filesystem and
-network permissions. The initial release includes four portable tools:
+network permissions. The initial release includes five portable tools:
 
 | Tool | Purpose |
 | --- | --- |
@@ -14,10 +17,24 @@ network permissions. The initial release includes four portable tools:
 | [jaq](external_tools/jaq/) | The upstream jq-compatible CLI for structured data |
 | [code](external_tools/code/) | Tree-sitter code search and definition retrieval |
 | [markitdown](external_tools/markitdown/) | The upstream MarkItDown CLI's local PDF profile |
+| [ripgrep](external_tools/ripgrep/) | Text search using upstream ripgrep libraries |
 
 The host lives in [sat/](sat/). Other tool sources in [external_tools/](external_tools/)
 are experimental and are excluded from the initial release. The exact release
 selection lives in [release-tools.toml](external_tools/release-tools.toml).
+
+## Upstream credits
+
+SAT builds on work by the authors and maintainers of
+[CPython](https://github.com/python/cpython),
+[componentize-py](https://github.com/bytecodealliance/componentize-py),
+[jaq](https://github.com/01mf02/jaq),
+[Tree-sitter](https://github.com/tree-sitter/tree-sitter),
+[MarkItDown](https://github.com/microsoft/markitdown), and
+[ripgrep](https://github.com/BurntSushi/ripgrep).
+Each tool's README identifies its upstream projects and licenses.
+Release tool archives include `THIRD_PARTY_NOTICES.txt` with the retained
+upstream license texts; SAT keeps this file when registering a tool.
 
 ## What you can link into the sandbox
 Currently we allow 
@@ -155,7 +172,7 @@ checksums. These URLs become available after the first release is published.
 
 ### Linux and macOS
 
-Install SAT and the four default tools (`python`, `jaq`, `code`, `markitdown`):
+Install SAT and the five default tools (`python`, `jaq`, `code`, `markitdown`, `ripgrep`):
 
 ```sh
 curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.sh | bash -s -- default-tools
@@ -180,7 +197,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### Windows PowerShell
 
-Install the Windows x64 host and all four tools:
+Install the Windows x64 host and all five tools:
 
 ```powershell
 & ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.ps1"))) -Tools "default-tools"
@@ -215,14 +232,138 @@ sat register <path-to-tar>
 
 ## Build your own Tools
 
-### TODO: what do we need to do to build our own tools?
+You can build your own tools in any language that compiles to the Webassembly System Interface (WASI) Preview 2.
+See a list of [supported languages](https://wasi.dev/languages).
+
+Build your tool as a WASI Preview 2 component named `tool.wasm`. Package it with
+`tool.toml` and `defaults.toml`. Keep the interface definition, `world.wit`,
+alongside your source. See [external_tools/jaq/](external_tools/jaq/) for a
+complete Rust example.
+
+### tool.wasm
+
+The component must export the entrypoint configured in `tool.toml`. SAT can
+generate a CLI from the metadata; tools with an existing CLI can use argument
+passthrough instead.
+
+### world.wit
+
+This defines the functions the component imports and exports. The compiler
+embeds that interface in `tool.wasm`; the WIT file stays with your source.
+
+### tool.toml
+
+This contains the tool's identity, entrypoint, and CLI metadata. For jaq:
+
+```toml
+name = "jaq"
+version = "3.1.2"
+description = "Upstream jaq CLI: jq-compatible filters, positional files, stdin, variables, modules, and JSON/YAML/TOML/XML/CBOR formats"
+entrypoint = "run"  # Exported function called by SAT
+command_output = true  # Forward sandbox stdout/stderr
+cli_passthrough = true  # Pass tool arguments unchanged to run(args: list<string>); the tool parses its CLI
+
+[[arguments]]
+name = "args"
+help = "Arguments passed unchanged to upstream jaq"
+```
+
+`command_output` treats the returned integer as an exit status.
+`cli_passthrough` forwards tool arguments unchanged.
+
+### defaults.toml
+
+This suggests permissions during registration. Start with no filesystem or
+HTTP access:
+
+```toml
+[file_permissions]
+read = []
+write = []
+deny-read = []
+deny-write = []
+
+[http_permissions]
+allow-http = []
+```
+
+### Packaging
+
+Package to tar with:
+
+```sh
+tar -cf jaq.tar tool.wasm tool.toml defaults.toml
+```
+
+Register it and check its CLI:
+
+```sh
+sat register jaq.tar
+sat jaq --help
+```
 
 ## Future Considerations
 
-This is a very early version of what SAT can become. There are many more interesting paths to explore, of which I just want to point to 
-WASI's type system (todo: provide link) and the possiblities this means for composing various tools without relying on serialization or the command line to hand over intermediate objects.
+This is a very early version of what SAT can become. One interesting direction is composing tools through typed interfaces (see the [WIT Reference](https://component-model.bytecodealliance.org/design/wit.html)), passing structured data directly between components.
 
-(todo: maybe we could sketch something here).
+For example, one component could decode an image into dimensions, metadata, and pixels:
+
+`loader.wit`:
+
+```wit
+package example:vision;
+
+interface images {
+    record image {
+        width: u32,
+        height: u32,
+        metadata: list<tuple<string, string>>,
+        pixels: list<u8>, // Row-major RGBA8: four bytes per pixel.
+    }
+}
+
+interface loading {
+    use images.{image};
+    load: func(encoded: list<u8>) -> result<image, string>;
+}
+
+world image-loader {
+    export images;
+    export loading;
+}
+```
+
+A second component could receive that image as a typed argument and locate areas of high contrast:
+
+`contrast.wit` (using the same package):
+
+```wit
+package example:vision;
+
+interface contrast {
+    use images.{image};
+
+    record region {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    }
+
+    locate: func(input: image, threshold: f32) -> list<region>;
+}
+
+world contrast-detector {
+    import images;
+    export contrast;
+}
+```
+
+The intended flow is `loader.load(encoded) → image → contrast.locate(image, threshold)`, with a successful load passing the complete image record to the detector. It receives dimensions, metadata, and pixel bytes together and returns bounding boxes for the detected regions. No intermediate CLI arguments, JSON, or image file are needed.
+
+Unlike a resource handle, this record passes data by value; the pixel buffer may be copied between components. This is a future composition sketch, not a currently supported SAT pipeline. SAT would need to wire the interfaces together and pass the typed values between tools.
+
+Wasmtime supports per-call execution limits through [fuel metering](https://docs.wasmtime.dev/examples-interrupting-wasm.html#deterministic-fuel) and [epoch-based interruption](https://docs.wasmtime.dev/examples-interrupting-wasm.html#non-deterministic-epochs). Early experimentation showed that more work needs to be put into this area before adding it to SAT.
 
 ## Local Development: Build and use
 
@@ -246,7 +387,8 @@ selected with `WASI_SDK_PATH` for its Tree-sitter C grammars. Python and
 MarkItDown use pinned `componentize-py` in a host-side virtual environment.
 The first build needs network access to obtain build dependencies.
 
-Packages contain exactly `tool.wasm`, `tool.toml`, and `defaults.toml`.
+Packages require `tool.wasm`, `tool.toml`, and `defaults.toml`; release tools
+also include `THIRD_PARTY_NOTICES.txt` for upstream licenses and notices.
 They are portable WASI components; SAT compiles and caches native code on the
 machine where a tool is registered.
 
@@ -289,7 +431,7 @@ MarkItDown upstream PDF/CLI comparison run in CI.
 
 [Build and release tools](.github/workflows/tool-releases.yml) derives its build
 matrix from the release selection file. The complete archive check requires
-exactly `python.tar`, `jaq.tar`, `code.tar`, and `markitdown.tar`; it rejects
+exactly `python.tar`, `jaq.tar`, `code.tar`, `markitdown.tar`, and `ripgrep.tar`; it rejects
 missing or extra assets.
 
 Branch pushes, pull requests, and manual runs produce Actions artifacts.
@@ -308,7 +450,7 @@ git push origin v0.1.0
 
 These commands are explicit publishing steps. See [release.md](release.md)
 for this branch's scope. Release assets include native SAT archives for the four
-supported platforms, the four tool archives, `install.sh`, `install.ps1`, and
+supported platforms, the five tool archives, `install.sh`, `install.ps1`, and
 `SHA256SUMS`.
 
 Download an archive from Releases and use `sat register` with its path or URL.
@@ -318,7 +460,8 @@ With the release archives and installer scripts downloaded, verify them using
 ```sh
 python3 external_tools/check_archives.py --complete \
   external_tools/python/dist/python.tar external_tools/jaq/dist/jaq.tar \
-  external_tools/code/dist/code.tar external_tools/markitdown/dist/markitdown.tar
+  external_tools/code/dist/code.tar external_tools/markitdown/dist/markitdown.tar \
+  external_tools/ripgrep/dist/ripgrep.tar
 ```
 
 Build outputs, local toolchains, credentials, personal sample data, logs,

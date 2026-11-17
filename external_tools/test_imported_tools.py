@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SAT = ROOT / 'sat/target/debug' / ('sat.exe' if os.name == 'nt' else 'sat')
 LOGGER = Path.home() / '.codex/skills/sat/scripts/run_sat.py'
 SAT_COMMAND = [sys.executable, str(LOGGER), '--'] if LOGGER.exists() else [str(SAT)]
-TOOLS = ['code', 'jaq']
+TOOLS = ['code', 'jaq', 'ripgrep']
 
 
 def check(name, build=True):
@@ -80,6 +80,33 @@ def check(name, build=True):
             invoke(*args, '--', '--read', image, ok=False)
             assert output.read_bytes() == saved
             invoke(*args, '--', '--write', output, ok=False)
+        if name == 'ripgrep':
+            directory = base / 'search'
+            directory.mkdir()
+            (directory / 'a-readable.txt').write_text('needle before\n')
+            (directory / 'z-readable.txt').write_text('needle after\n')
+            (directory / 'denied.txt').write_text('needle denied secret\n')
+            protected = base / 'protected.txt'
+            protected.write_text('needle hard-linked secret\n')
+            os.link(protected, directory / 'linked.txt')
+            search = [command, 'needle', '--paths', directory]
+            grants = ['--', '--read', directory, '--deny-read', '**/denied.txt']
+            result = json.loads(invoke(*search, '--format', 'json', *grants).stdout)
+            # Explicit deny-read entries are hidden during traversal; the hard link
+            # is visible but its open is denied, so only that file is counted.
+            assert result['skipped_paths'] == 1, result
+            assert not result['truncated'], result
+            assert {row['text'] for row in result['results']} == {'needle before', 'needle after'}, result
+            text = invoke(*search, *grants).stdout
+            assert b'[skipped 1 paths: permission denied]' in text, text
+            assert b'secret' not in text, text
+            assert protected.read_text() == 'needle hard-linked secret\n'
+            # A denied traversal root must not prevent searching another root.
+            roots = json.loads(invoke(command, 'needle', '--paths', protected,
+                                      '--paths', directory / 'a-readable.txt',
+                                      '--format', 'json', '--', '--read', directory).stdout)
+            assert roots['skipped_paths'] == 1, roots
+            assert [row['text'] for row in roots['results']] == ['needle before'], roots
         assert source.read_bytes() == original
         if hasattr(os, 'symlink') and name in ['uutils', 'code', 'ripgrep']:
             link = base / 'escape.py'
