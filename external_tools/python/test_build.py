@@ -22,6 +22,8 @@ class BuildCacheTests(unittest.TestCase):
             (target / "builder/Scripts/python.exe").touch()
             (root / "wit").mkdir()
             (root / "app.py").write_text("# wrapper one\n")
+            (root / "sat_http.py").write_text("# transport one\n")
+            (root / "build.py").write_text("# builder\n")
             (root / "wit/world.wit").write_text("world test {}\n")
             builds = []
 
@@ -44,12 +46,19 @@ class BuildCacheTests(unittest.TestCase):
                 (root / "wit/world.wit").write_text("world changed {}\n")
                 build.build()
                 self.assertEqual(len(builds), 3)
-                artifact.write_bytes(b"tampered")
+                (root / "sat_http.py").write_text("# transport two\n")
                 build.build()
                 self.assertEqual(len(builds), 4)
+                (root / "wit/deps").mkdir()
+                (root / "wit/deps/http.wit").write_text("package wasi:http;\n")
+                build.build()
+                self.assertEqual(len(builds), 5)
+                artifact.write_bytes(b"tampered")
+                build.build()
+                self.assertEqual(len(builds), 6)
                 with patch.object(build, "BUILDER", "different-version"):
                     build.build()
-                self.assertEqual(len(builds), 5)
+                self.assertEqual(len(builds), 7)
 
 
 if __name__ == "__main__":

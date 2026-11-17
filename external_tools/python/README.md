@@ -40,3 +40,35 @@ Run execution, standard-library and permission checks against an existing host:
 ```sh
 python3 external_tools/python/test.py --sat sat/target/release/sat
 ```
+
+
+## HTTP and HTTPS
+
+The component includes a `urllib.request` transport backed by WASI HTTP.
+Requests use the host's HTTP/TLS implementation and hostname policy, without
+granting Python raw sockets or host networking.
+
+```sh
+sat python -c 'import urllib.request
+with urllib.request.urlopen("https://example.com", timeout=10) as response:
+    print(response.status)
+    print(response.read(200).decode())
+' -- --allow-http example.com
+```
+
+Registration defaults deny HTTP. `--allow-http example.com` permits that
+hostname for this invocation. Every redirect is checked again by the host;
+a redirect to an ungranted hostname fails. Requests do not need filesystem grants.
+
+GET, HEAD, byte-body requests such as POST, headers, HTTP errors, and
+`urlopen(..., timeout=seconds)` are supported. Request and response bodies
+are buffered up to 8 MiB by the adapter. Streaming uploads/downloads, proxies,
+custom Python TLS contexts, and socket-based third-party clients such as
+requests/httpx are outside this profile. HTTPS certificate validation stays
+in the host transport; Python does not need an SSL extension for this adapter.
+
+Run the deterministic local-server checks, including denied hosts and redirects:
+
+```sh
+python3 external_tools/python/test_http.py --sat sat/target/release/sat
+```

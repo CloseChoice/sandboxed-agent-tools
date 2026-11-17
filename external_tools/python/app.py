@@ -55,6 +55,10 @@ import encodings.utf_16_le
 import gzip
 import locale
 
+import encodings.idna
+import sat_http
+sat_http.install()
+
 import wit_world
 from componentize_py_types import Err
 

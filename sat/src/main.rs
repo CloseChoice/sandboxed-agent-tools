@@ -1,4 +1,4 @@
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use clap::Parser;
 // todo: this is not safe agent tools ->
 use sandboxed_agent_tools::{
@@ -34,12 +34,7 @@ async fn run() -> Result<()> {
             sandboxed_agent_tools::browser::serve(chrome, headed, duration).await?;
         }
         Action::Init { force } => {
-            let path = config::project_config(&cwd);
-            ensure!(
-                force || !path.exists(),
-                "project config already exists; use --force (-f) to overwrite"
-            );
-            config::save(&path, &Configuration::default())?;
+            let path = config::initialize_project(&home, &cwd, force)?;
             println!("Created {}", path.display());
         }
         Action::Register { source, force } => {

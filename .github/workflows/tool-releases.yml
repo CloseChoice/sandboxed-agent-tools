@@ -7,6 +7,8 @@ on:
       - 'sat/**'
       - 'rust-toolchain.toml'
       - 'scripts/**'
+      - 'install.sh'
+      - 'install.ps1'
       - '.github/workflows/tool-releases.yml'
   push:
     branches: ['**']
@@ -16,6 +18,8 @@ on:
       - 'sat/**'
       - 'rust-toolchain.toml'
       - 'scripts/**'
+      - 'install.sh'
+      - 'install.ps1'
       - '.github/workflows/tool-releases.yml'
   workflow_dispatch:
 
@@ -179,6 +183,7 @@ jobs:
           mkdir -p external_tools/python/dist
           cp release-assets/python.tar external_tools/python/dist/python.tar
           python3 external_tools/python/test.py --skip-build --sat sat/target/debug/sat
+          python3 external_tools/python/test_http.py --sat sat/target/debug/sat
 
   build-sat:
     name: SAT host (${{ matrix.target }})
@@ -213,6 +218,8 @@ jobs:
           workspaces: sat -> target
           key: release-host-${{ matrix.target }}
           save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Check installer scripts
+        run: python3 scripts/test_installers.py
       - name: Build native SAT executable
         run: cargo build --locked --release --manifest-path sat/Cargo.toml --target "$HOST_TARGET"
       - name: Test native host capability boundaries
@@ -262,10 +269,12 @@ jobs:
         run: |
           python3 external_tools/check_archives.py --complete release-assets/*.tar
           python3 scripts/host_release.py verify release-assets
+      - name: Include installers in the release bundle
+        run: cp install.sh install.ps1 release-assets/
       - name: Generate and verify checksums
         working-directory: release-assets
         run: |
-          sha256sum *.tar *.tar.gz *.zip > SHA256SUMS
+          sha256sum *.tar *.tar.gz *.zip install.sh install.ps1 > SHA256SUMS
           sha256sum --check SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
@@ -304,7 +313,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release-assets/*.tar release-assets/*.tar.gz release-assets/*.zip release-assets/SHA256SUMS)
+          assets=(release-assets/*.tar release-assets/*.tar.gz release-assets/*.zip release-assets/install.sh release-assets/install.ps1 release-assets/SHA256SUMS)
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             # Reruns can finish an interrupted upload without creating another release.
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber

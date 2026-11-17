@@ -145,6 +145,23 @@ impl Configuration {
     }
 }
 
+/// Snapshot the currently effective settings into the project configuration.
+/// Existing project restrictions win over global settings, including with force.
+pub fn initialize_project(home: &Path, cwd: &Path, force: bool) -> Result<PathBuf> {
+    let path = project_config(cwd);
+    ensure!(
+        force || !path.exists(),
+        "project config already exists; use --force (-f) to overwrite"
+    );
+    let mut config = Configuration::effective(home, cwd)?;
+    for name in crate::registry::registered_tool_names(home)? {
+        // Package suggestions are untrusted; an unconfigured tool gets no authority.
+        config.tools.entry(name).or_default();
+    }
+    save(&path, &config)?;
+    Ok(path)
+}
+
 pub fn project_config(cwd: &Path) -> PathBuf {
     cwd.join(".sat/config.overrides.toml")
 }
@@ -172,4 +189,114 @@ pub fn save(path: &Path, config: &Configuration) -> Result<()> {
     file.as_file().sync_all()?;
     file.persist(path).map_err(|e| e.error)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn register_fixture(home: &Path, name: &str) {
+        let directory = home.join("tools").join(name);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("tool.toml"), format!("name = '{name}'")).unwrap();
+        // Init must not treat package suggestions as approved authority.
+        std::fs::write(
+            directory.join("defaults.toml"),
+            "[file_permissions]\nread = ['$PWD']\nwrite = ['$PWD']\n",
+        )
+        .unwrap();
+    }
+
+    fn serialized(config: &Configuration) -> String {
+        toml::to_string(config).unwrap()
+    }
+
+    #[test]
+    fn init_copies_global_settings_and_explicitly_denies_unconfigured_tools() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let cwd = root.path().join("project");
+        std::fs::create_dir_all(&cwd).unwrap();
+        register_fixture(&home, "python");
+        register_fixture(&home, "jaq");
+        let settings = ToolSettings {
+            alias: Some("py".into()),
+            file_permissions: FilePermissions {
+                read: vec!["$PWD/inputs".into()],
+                write: vec!["$PWD/output".into()],
+                deny_read: vec!["**/secret*".into()],
+                deny_write: vec!["**/protected*".into()],
+            },
+            http_permissions: HttpPermissions {
+                allow_http: Some(vec!["api.example.com".into()]),
+                deny_http: None,
+            },
+            ..Default::default()
+        };
+        let mut global = Configuration::default();
+        global.tools.insert("python".into(), settings);
+        save(&home.join("config.toml"), &global).unwrap();
+        let global_before = std::fs::read(home.join("config.toml")).unwrap();
+
+        let path = initialize_project(&home, &cwd, false).unwrap();
+        let snapshot = Configuration::read(&path).unwrap();
+        let mut expected = global;
+        expected.tools.insert("jaq".into(), ToolSettings::default());
+        assert_eq!(serialized(&snapshot), serialized(&expected));
+        assert_eq!(
+            snapshot.tools["python"].file_permissions.write,
+            ["$PWD/output"]
+        );
+        assert!(snapshot.tools["jaq"].file_permissions.write.is_empty());
+        assert_eq!(
+            std::fs::read(home.join("config.toml")).unwrap(),
+            global_before
+        );
+        assert_eq!(
+            serialized(&Configuration::effective(&home, &cwd).unwrap()),
+            serialized(&expected)
+        );
+    }
+
+    #[test]
+    fn init_refuses_overwrite_and_force_preserves_project_restrictions() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let cwd = root.path().join("project");
+        register_fixture(&home, "python");
+        register_fixture(&home, "jaq");
+        let mut broad = ToolSettings::default();
+        broad.file_permissions.write.push("$PWD".into());
+        let mut global = Configuration::default();
+        global.tools.insert("python".into(), broad);
+        global.tools.insert("jaq".into(), ToolSettings::default());
+        save(&home.join("config.toml"), &global).unwrap();
+        let mut local = Configuration::default();
+        local.tools.insert("python".into(), ToolSettings::default());
+        let path = project_config(&cwd);
+        save(&path, &local).unwrap();
+        let original = std::fs::read(&path).unwrap();
+
+        assert!(initialize_project(&home, &cwd, false).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        initialize_project(&home, &cwd, true).unwrap();
+        let snapshot = Configuration::read(&path).unwrap();
+        assert!(snapshot.tools["python"].file_permissions.write.is_empty());
+        assert!(snapshot.tools.contains_key("jaq"));
+    }
+
+    #[test]
+    fn invalid_global_settings_do_not_create_a_project_config() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("home");
+        let cwd = root.path().join("project");
+        register_fixture(&home, "python");
+        let mut settings = ToolSettings::default();
+        settings.file_permissions.deny_read.push("[".into());
+        let mut global = Configuration::default();
+        global.tools.insert("python".into(), settings);
+        save(&home.join("config.toml"), &global).unwrap();
+        assert!(initialize_project(&home, &cwd, false).is_err());
+        assert!(!project_config(&cwd).exists());
+    }
 }

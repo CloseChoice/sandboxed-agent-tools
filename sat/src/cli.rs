@@ -35,7 +35,7 @@ pub enum Action {
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=3600))]
         duration: Option<u64>,
     },
-    /// Create project configuration.
+    /// Snapshot effective permissions for all registered tools into project configuration.
     Init {
         #[arg(short = 'f', long)]
         force: bool,

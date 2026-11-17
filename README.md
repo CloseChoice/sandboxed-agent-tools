@@ -1,5 +1,10 @@
 # Sandboxed Agent Tools (SAT)
 
+SAT provides sandboxing your tools. It provides capabilities to allow read and write to files and http calls on a per-tool-call basis.
+SAT uses the Webassembly System Interface (WASI) for sandboxing. This means we rely on proven architecture and just provide the glue
+to make sandboxing for tools work.
+Currently there are 4 tools available
+
 SAT is a native host that runs WebAssembly tools with explicit filesystem and
 network permissions. The initial release includes four portable tools:
 
@@ -14,7 +19,212 @@ The host lives in [sat/](sat/). Other tool sources in [external_tools/](external
 are experimental and are excluded from the initial release. The exact release
 selection lives in [release-tools.toml](external_tools/release-tools.toml).
 
-## Build and use
+## What you can link into the sandbox
+Currently we allow 
+
+## Permission limitations
+
+**Do not grant a tool write access to SAT configuration files or any directory
+that contains them.** This applies both to CLI `--write` grants and to the
+`write` lists in configuration files.
+
+Keep all of the following outside a tool's write grants:
+
+- `$SAT_HOME/config.toml` (normally `~/.sat/config.toml`).
+- The project's `.sat/config.overrides.toml`.
+- The directories containing those files, including the project's `.sat/`
+  directory and `$SAT_HOME`.
+- **Every ancestor directory of those files.** A broad write grant to the
+  project root, your home directory, or the filesystem root can include a
+  protected configuration path even when you never name that file explicitly.
+
+Use dedicated output directories that neither contain SAT configuration files
+nor are ancestors of those files. Keep their ancestor directories outside the
+tool's write grants as well when moving those ancestors could relocate SAT
+configuration or `$SAT_HOME`.
+
+These restrictions address known weaknesses:
+
+- A permitted tool can rewrite project settings when those settings are writable.
+- Renaming a writable parent can bypass exclusions on its children.
+- Renaming an ancestor can bypass `$SAT_HOME` protection.
+
+**A child `deny-write` rule does not make a broad parent write grant safe.**
+Denying writes to the configuration filenames alone is not a complete
+mitigation for the rename weaknesses. Do not rely on such rules while granting
+write access to the relevant ancestor directories.
+
+These are explicit usage constraints while the weaknesses remain. Host-enforced
+configuration protection must cover direct changes and renames affecting
+protected directories or their ancestors; fixed filenames or a hard-coded
+`SAT_HOME` path alone do not provide that guarantee.
+
+## Usage
+
+There are two ways how to control what permissions your tools get:
+- the cli
+- the sat config file
+
+### SAT's CLI Interface
+
+#### File Permissions
+Run a tool via 
+```bash
+sat <toolname> toolarg1 toolarg2 --toolkwarg1 -- --read <file_or_dir1> --read <file_or_dir2> --read <file_or_dir3> --write <file_or_dir4>
+```
+E.g. for the python tool one can do
+```bash
+touch dummy1.txt
+sat python -c "f = open('$PWD/dummy1.txt', 'w+');f.write('hi there from the sandbox') " -- --write $PWD/dummy1.txt
+```
+While this would fail
+```bash
+touch dummy1.txt
+sat python -c "f = open('$PWD/dummy1.txt', 'w+');f.write('hi there from the sandbox') " -- --read $PWD/dummy1.txt
+```
+with an `PermissionError`.
+
+Another example using http calls:
+```bash
+sat python -c 'import urllib.request; print(urllib.request.urlopen("https://example.com", timeout=10).read(200).decode())' -- --allow-http example.com
+```
+
+This fails if the called and target url don't align:
+```bash
+sat python -c 'import urllib.request; print(urllib.request.urlopen("https://example.com", timeout=10).read(200).decode())' -- --allow-http google.com
+```
+
+Redirects must be explicitly allowed
+```bash
+sat python -c 'from urllib import request; r = request.urlopen("https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com", timeout=10); print(r.status, r.geturl())' -- --allow-http httpbin.org --allow-http example.com
+```
+but remove `--allow-http example.com` and this fails.
+
+### SAT Config
+#### File Permissions
+
+By default sat stores its data at `~/.sat/`. This path is changable and needs to be exposed through `SAT_HOME`.
+In there lives a toml file with the configuration for all tools: `config.toml`. This file has the following structure
+
+```toml
+[tools.python.file_permissions]
+read = ["$PWD/inputs"]
+write = ["$PWD/output"]
+deny-read = ["**/*.key"]
+deny-write = []
+
+[tools.python.http_permissions]
+allow-http = ["example.com", "httpbin.org"]
+
+# we omit more examples here, the general pattern is
+# [tools.<toolname>.file_permissions]
+# read = ["$PWD/some_path", "$SAT_HOME/some_other_path", "/some_absolute_path"]
+# write = []
+# deny-read = []
+# deny-write = []
+# 
+# [tools.<toolname>.http_permissions]
+# allow-http = []
+```
+
+`read` grants read-only access; `write` grants read and write access.
+Before adding a write grant, follow the [configuration and ancestor-directory
+restrictions](#permission-limitations) above.
+`deny-read` and `deny-write` contain exclusion globs. Empty lists grant no
+access. Filesystem grant paths must exist and be absolute or start with the
+literal `$PWD/` or `$SAT_HOME/`; SAT resolves these placeholders when a tool
+runs.
+
+`allow-http` lists permitted hostnames, without a scheme, port, or path.
+An empty allowlist denies all HTTP requests. Redirect destinations need their
+own matching hostname grant. Set either `allow-http` or `deny-http`, never both.
+
+Project settings live in `.sat/config.overrides.toml` and replace the global
+settings for each tool listed there. `sat init` creates a snapshot of the
+effective settings for all registered tools.
+`sat init --force` refreshes an
+existing file while preserving its project overrides. Use `sat config` or
+`sat config python` to inspect the effective settings. CLI permission flags
+after `--` override the corresponding lists for that invocation.
+
+
+## Getting Started
+
+The installers download published GitHub Release assets and verify their SHA-256
+checksums. These URLs become available after the first release is published.
+
+### Linux and macOS
+
+Install SAT and the four default tools (`python`, `jaq`, `code`, `markitdown`):
+
+```sh
+curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.sh | bash -s -- default-tools
+```
+
+Or select tools and an exact release version:
+
+```sh
+curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.sh | bash -s -- python,jaq --version 0.1.0
+```
+
+Omit the tool argument to install only SAT. The script detects Linux x64,
+Intel macOS, or Apple Silicon macOS. Override detection with
+`--platform linux-x64`, `macos-x64`, or `macos-arm64`.
+
+SAT is installed to `~/.local/bin`; change this with `--bin-dir DIRECTORY`.
+If needed, add that directory to your shell's PATH:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### Windows PowerShell
+
+Install the Windows x64 host and all four tools:
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.ps1"))) -Tools "default-tools"
+```
+
+For an exact version and selected tools:
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.ps1"))) -Tools "python,jaq" -Version "0.1.0"
+```
+
+Omit `-Tools` to install only SAT. The default binary directory is
+`$env:LOCALAPPDATA\SAT\bin`; override it with `-BinDir DIRECTORY`.
+The script prints the command to add this directory to the current session's
+PATH. Add it to your user PATH for future sessions.
+
+Both scripts accept versions with or without the `v` prefix, including
+prereleases such as `0.1.0-rc.1`. For a prerelease, use its explicit version
+and versioned script URL. Omitting the version selects GitHub's latest release.
+Download URLs are derived from the tag and asset name, so publishing another
+version requires no URL edits in either script.
+
+New tools start with no filesystem or HTTP permissions. Existing project and
+global permission settings are kept. After installation, `sat init` writes a
+project configuration you can edit.
+
+You can also register a tool archive manually:
+
+```sh
+sat register <path-to-tar>
+```
+
+## Build your own Tools
+
+### TODO: what do we need to do to build our own tools?
+
+## Future Considerations
+
+This is a very early version of what SAT can become. There are many more interesting paths to explore, of which I just want to point to 
+WASI's type system (todo: provide link) and the possiblities this means for composing various tools without relying on serialization or the command line to hand over intermediate objects.
+
+(todo: maybe we could sketch something here).
+
+## Local Development: Build and use
 
 Build the host with the repository's pinned Rust toolchain:
 
@@ -97,11 +307,12 @@ git push origin v0.1.0
 ```
 
 These commands are explicit publishing steps. See [release.md](release.md)
-for this branch's scope. Release assets are the four tool archives and
-`SHA256SUMS`; build the native SAT host from source.
+for this branch's scope. Release assets include native SAT archives for the four
+supported platforms, the four tool archives, `install.sh`, `install.ps1`, and
+`SHA256SUMS`.
 
 Download an archive from Releases and use `sat register` with its path or URL.
-With all four archives downloaded, verify them using
+With the release archives and installer scripts downloaded, verify them using
 `sha256sum --check SHA256SUMS`. To check local archive contents:
 
 ```sh

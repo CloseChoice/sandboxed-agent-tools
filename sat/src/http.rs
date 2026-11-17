@@ -74,7 +74,7 @@ impl WasiHttpHooks for HttpPermissions {
     fn send_request(
         &mut self,
         mut request: Request<WasiBody>,
-        _: Option<RequestOptions>,
+        options: Option<RequestOptions>,
         _: IoFuture,
     ) -> ResponseFuture {
         if !self.permits(request.uri()) {
@@ -87,7 +87,7 @@ impl WasiHttpHooks for HttpPermissions {
         request.headers_mut().insert(http::header::HOST, host);
 
         Box::new(async move {
-            let (response, io) = wasmtime_wasi_http::default_send_request(request, None).await?;
+            let (response, io) = wasmtime_wasi_http::default_send_request(request, options).await?;
             Ok((
                 response.map(BodyExt::boxed_unsync),
                 Box::new(io) as IoFuture,

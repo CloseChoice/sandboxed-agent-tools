@@ -1,6 +1,6 @@
 name = "python"
 version = "0.1.0"
-description = "Run Python code inside a WASI sandbox."
+description = "Run Python code in WASI; urllib HTTP/HTTPS uses host-enforced hostname grants."
 entrypoint = "run"
 exactly_one_of = ["code", "script"]
 
@@ -17,3 +17,6 @@ command = 'sat python -c "print(1 + 2)"'
 
 [[examples]]
 command = 'sat python /absolute/script.py -- --read /absolute/script.py'
+
+[[examples]]
+command = "sat python -c 'import urllib.request; print(urllib.request.urlopen(\"https://example.com\").status)' -- --allow-http example.com"

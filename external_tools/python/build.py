@@ -27,7 +27,10 @@ def build():
     spec = {
         "builder": f"componentize-py=={BUILDER}",
         "host_python": subprocess.check_output([str(python), "--version"], text=True).strip(),
-        "sources": {name: (ROOT / name).read_text() for name in ["app.py", "wit/world.wit"]},
+        "sources": {str(path.relative_to(ROOT)): path.read_text()
+                    for path in [ROOT / "app.py", ROOT / "sat_http.py", ROOT / "build.py",
+                                 *sorted((ROOT / "wit").rglob("*"))]
+                    if path.is_file()},
     }
     fingerprint = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()
     output = TARGET / "python.wasm"
