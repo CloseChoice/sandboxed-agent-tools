@@ -32,10 +32,26 @@ def check_package(directory):
     return package["version"]
 
 
+def tagged_version(version, tag):
+    expected = f"v{version}"
+    if not tag or tag == expected:
+        return version
+    prefix = f"{expected}-"
+    identifier = r"(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    prerelease = rf"{identifier}(?:\.{identifier})*"
+    if (re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
+            and tag.startswith(prefix)
+            and re.fullmatch(prerelease, tag[len(prefix):])):
+        return tag[1:]
+    raise ValueError(f"release tag must be {expected} or a matching prerelease, got {tag}")
+
+
 def validate(root=ROOT, tag=None):
     version = check_package(root / "sat")
-    if tag is not None and tag != f"v{version}":
-        raise ValueError(f"release tag must be v{version}, got {tag}")
+    if tag is not None:
+        if not tag:
+            raise ValueError("release tag must be nonempty")
+        tagged_version(version, tag)
     names = release_tools(root)
     identities = set()
     for name in names:

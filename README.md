@@ -473,6 +473,10 @@ the bundle version, currently `0.1.0`. Rust tool metadata and lockfiles must
 match each tool's own Cargo version; Python-based tools keep their versions
 in `tool.toml`.
 
+With SAT at `0.1.0`, tag `v0.1.0-dev.1` to publish a prerelease. Its native
+archives include `0.1.0-dev.1` in their names, and `sat --version` reports
+`0.1.0`. Install it by specifying `0.1.0-dev.1` explicitly.
+
 After reviewing the committed sources and successful CI checks:
 
 ```sh

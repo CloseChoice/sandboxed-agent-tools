@@ -12,6 +12,8 @@ import tempfile
 import tomllib
 import zipfile
 
+from release import tagged_version
+
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     {"os": "ubuntu-24.04", "target": "x86_64-unknown-linux-gnu"},
@@ -33,7 +35,8 @@ def binary_name(target):
 
 def archive_name(target):
     suffix = ".zip" if "windows" in target else ".tar.gz"
-    return f"sat-{version()}-{target}{suffix}"
+    release_version = tagged_version(version(), os.environ.get("SAT_RELEASE_TAG"))
+    return f"sat-{release_version}-{target}{suffix}"
 
 
 def check_binary(data, target):
