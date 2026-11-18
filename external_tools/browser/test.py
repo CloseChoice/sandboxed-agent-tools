@@ -173,7 +173,14 @@ def check(build=True, artifacts=None):
             assert created.read_bytes().startswith(b'\x89PNG')
             blocked = output_dir / 'blocked.png'
             blocked.write_bytes(b'unchanged')
-            browser('screenshot', output=blocked, grants=['--write', output_dir, '--deny-write', '**/blocked.png'], ok=False)
+            config_dir = base / '.sat'
+            config_dir.mkdir(exist_ok=True)
+            (config_dir / 'config.overrides.toml').write_text(
+                '[tools.browser.file_permissions]\nread = []\nwrite = []\n'
+                'deny-read = []\ndeny-write = ["**/blocked.png"]\n'
+                '[tools.browser.http_permissions]\nallow-http = []\n'
+            )
+            browser('screenshot', output=blocked, grants=['--write', output_dir], ok=False)
             assert blocked.read_bytes() == b'unchanged'
             link = output_dir / 'escape.png'
             try:

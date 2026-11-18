@@ -46,7 +46,7 @@ source .bashrc
 - sat <toolname>
     execute a tool
     Tools might need more parameters, the syntax works as
-    sat <toolname> <toolarg1> <toolarg2> --<toolkey1> <toolvalue1> -- --read PATH --write PATH --deny-read PATTERN --deny-write PATTERN --allow-http HOSTNAME
+    sat <toolname> <toolarg1> <toolarg2> --<toolkey1> <toolvalue1> -- --read PATH --write PATH --allow-http HOSTNAME
 - sat config [<toolname>]
     Show the current config of sat + tools, if toolname is provided, just show the config of that.
 - `sat python -c`/`sat python <filename>.py`
@@ -119,8 +119,12 @@ Use repeatable `--read PATH` and `--write PATH` flags for files or directories.
 Write includes read access. Grant paths must exist. Directory grants are
 recursive, and writable directories permit creating new files inside them.
 
-Use repeatable `--deny-read PATTERN` and `--deny-write PATTERN` to exclude paths
-from grants. Corresponding per-tool settings are supported in configuration. Denials
+Use a quoted filename pattern such as `--read "$PWD/src/*.py"` to grant individual
+regular files. The host expands `*` and `?` in the last path component once per
+invocation. Write grants and configured grants use literal paths.
+
+Set `deny-read` and `deny-write` in the tool configuration to exclude paths
+from grants. Per-invocation flags preserve those exclusions. Denials
 always win and never grant access: deny-read blocks reads even through a write
 grant, while deny-write blocks writes. To protect a file from both operations,
 include it in both deny lists.
@@ -129,8 +133,7 @@ Deny patterns use glob matching against paths relative to each granted directory
 (or the basename for an individual file grant). `*` matches within one path
 segment, `?` matches one character within a segment, and `**` matches across
 segments. `**/.env` matches `.env` at any depth, including the grant root.
-Use `/` as the pattern separator on every platform. Quote patterns in shell
-commands so SAT receives them unchanged. The host must enforce exclusions on
+Use `/` as the pattern separator on every platform. The host must enforce exclusions on
 resolved targets as well as requested paths so symlinks and alternate paths
 cannot bypass them.
 

@@ -472,7 +472,7 @@ fn validate(request: &Request) -> Result<(), String> {
             || !Path::new(&request.paths[0]).is_file()
         {
             return Err(
-                "read-enclosing requires --position and exactly one accessible file in --paths"
+                "read-enclosing requires --position and exactly one accessible file in --path"
                     .into(),
             );
         }

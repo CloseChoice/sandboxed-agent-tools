@@ -135,7 +135,9 @@ pub fn bind_filesystem_import(
     let grant = access
         .grants
         .iter()
-        .filter(|r| path == r.path || r.directory && path.starts_with(&r.path))
+        .filter(|r| {
+            (!write || r.write) && (path == r.path || r.directory && path.starts_with(&r.path))
+        })
         .max_by_key(|r| r.path.components().count())
         .ok_or_else(|| anyhow::anyhow!("binding not granted"))?;
     let resource = if grant.directory {
@@ -154,12 +156,7 @@ pub fn bind_filesystem_import(
     } else {
         ensure!(!filesystem_import.directory, "binding requires directory");
         // Explicit file grants pin the selected inode without exposing its parent.
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(write)
-            .open(&path)?;
-        access::check_file(&file)?;
-        BoundFilesystemResource::File(file)
+        BoundFilesystemResource::File(grant.open_file(write)?)
     };
     Ok(FilesystemBinding {
         resource,

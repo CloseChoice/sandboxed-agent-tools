@@ -67,10 +67,6 @@ struct Permissions {
     read: Option<Vec<String>>,
     #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", value_name="PATH")]
     write: Option<Vec<String>>,
-    #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", value_name="GLOB")]
-    deny_read: Option<Vec<String>>,
-    #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", value_name="GLOB")]
-    deny_write: Option<Vec<String>>,
     #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", conflicts_with="deny_http",value_name="HOSTNAME")]
     allow_http: Option<Vec<String>>,
     #[arg(long, action=ArgAction::Append, num_args=0..=1, default_missing_value="", conflicts_with="allow_http",value_name="HOSTNAME")]
@@ -88,6 +84,7 @@ pub fn apply_permission_overrides(
             [
                 "--read",
                 "--write",
+                // Reserve the retired flags so clap rejects them even in first position.
                 "--deny-read",
                 "--deny-write",
                 "--allow-http",
@@ -111,21 +108,22 @@ pub fn apply_permission_overrides(
     fn remove_empty_permission_values(v: Vec<String>) -> Vec<String> {
         v.into_iter().filter(|s| !s.is_empty()).collect()
     }
+    let override_read = permissions.read.is_some();
     for (override_, target) in [
         (permissions.read, &mut settings.file_permissions.read),
         (permissions.write, &mut settings.file_permissions.write),
-        (
-            permissions.deny_read,
-            &mut settings.file_permissions.deny_read,
-        ),
-        (
-            permissions.deny_write,
-            &mut settings.file_permissions.deny_write,
-        ),
     ] {
         if let Some(v) = override_ {
+            settings.replaced_grants.append(target);
             *target = remove_empty_permission_values(v);
         }
+    }
+    if override_read {
+        let (patterns, paths) = std::mem::take(&mut settings.file_permissions.read)
+            .into_iter()
+            .partition(|value| crate::access::is_read_glob(std::path::Path::new(value)));
+        settings.read_globs = patterns;
+        settings.file_permissions.read = paths;
     }
     if let Some(v) = permissions.allow_http {
         settings.http_permissions.allow_http = Some(remove_empty_permission_values(v));
@@ -142,6 +140,24 @@ pub fn apply_permission_overrides(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filesystem_exclusions_are_configuration_only() {
+        let mut settings = ToolSettings::default();
+        settings.file_permissions.deny_read.push("**/.env".into());
+        settings
+            .file_permissions
+            .deny_write
+            .push("**/*.lock".into());
+        for flag in ["--deny-read", "--deny-write"] {
+            for args in [vec!["--", flag], vec!["--", "--read", "/file", flag, "*"]] {
+                let args = args.into_iter().map(String::from).collect::<Vec<_>>();
+                assert!(apply_permission_overrides(&args, &mut settings).is_err());
+            }
+        }
+        assert_eq!(settings.file_permissions.deny_read, ["**/.env"]);
+        assert_eq!(settings.file_permissions.deny_write, ["**/*.lock"]);
+    }
 
     #[test]
     fn preserves_upstream_separator_and_extracts_only_host_permissions() {

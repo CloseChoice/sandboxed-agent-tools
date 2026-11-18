@@ -6,7 +6,7 @@ world ripgrep {
     // Return text or JSON through WIT; guest stdout is never the result transport.
     export run: func(
         pattern: string,
-        paths: option<list<string>>,
+        path: option<list<string>>,
         ignore-case: bool,
         fixed-strings: bool,
         hidden: bool,

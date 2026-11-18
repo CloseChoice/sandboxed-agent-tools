@@ -12,11 +12,8 @@ help = "search, outline, read-symbol, or read-enclosing."
 name = "query"
 help = "Search text/regex, or exact symbol name for read-symbol. Omit for outline and read-enclosing."
 
-[options.paths]
-help = "Repeatable file/directory, glob (optionally glob: prefixed), or regex:ROOT::EXPR selector. Quote patterns. Grant roots after --."
-
 [options.path]
-help = "Same as --paths; repeat to combine selectors."
+help = "File/directory, glob, or regex:ROOT::EXPR selector. Repeat --path for each selector: --path /src --path /tests. Quote patterns. Grant roots after --."
 
 [options.exclude]
 help = "Repeatable exclusion: glob (default) or regex:EXPR. Matches root-relative or full paths; exclusions win. Slash-free globs also match basenames."

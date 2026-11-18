@@ -67,15 +67,14 @@ def check(sat=None):
         (src / 'escape.ts').unlink()
         expected = {'alpha', 'testAlpha', 'beta', 'component'}
         assert symbols('--path', src) == expected
-        assert symbols('--paths', src, '--path', src / 'a.ts') == expected
         assert symbols('--path', f'{src}/**/*.ts') == expected - {'component'}
-        assert symbols('--paths', f'glob:{src}/*.[jt]s') == {'alpha', 'testAlpha'}
+        assert symbols('--path', f'glob:{src}/*.[jt]s') == {'alpha', 'testAlpha'}
         assert symbols('--path', f'{src}/**/*.{{ts,tsx}}', '--exclude', '**/*.test.ts') == expected - {'testAlpha'}
         assert symbols('--path', rf'regex:{src}::(^|/)b\.ts$') == {'beta'}
         assert symbols('--path', src, '--exclude', r'regex:(^|/)a(\.test)?\.ts$') == {'beta', 'component'}
         assert symbols('--path', src, '--exclude', 'nested') == {'alpha', 'testAlpha'}
         assert symbols('--path', f'{src}/**/*.rb') == set()
-        assert symbols('--paths', src / 'a.ts') == {'alpha'}
+        assert symbols('--path', src / 'a.ts') == {'alpha'}
         assert symbols('--path', src, '--path', lib, grants=project) == expected | {'extra'}
         assert symbols('--path', src / 'node_modules', grants=project) == {'dependency'}
         assert symbols('--path', src, '--path', src / 'node_modules', '--exclude', 'node_modules', grants=project) == expected
@@ -87,7 +86,7 @@ def check(sat=None):
         invoke('code', 'outline', '--path', src / 'escape.ts', '--', '--read', src, ok=False)
         assert secret.read_text() == 'function secretMarker() {}\n'
         print(json.dumps({'sat_calls': calls, 'expected_denials': failures}, indent=2))
-        print('code: selector, compatibility, ignore-rule and confinement checks passed')
+        print('code: selector, ignore-rule and confinement checks passed')
 
 
 if __name__ == '__main__':

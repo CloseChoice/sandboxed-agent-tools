@@ -5,7 +5,7 @@ Sandboxed text search using upstream ripgrep libraries.
 ```sh
 bash external_tools/ripgrep/package.sh  # tar (default) or zip
 sat register external_tools/ripgrep/dist/ripgrep.tar
-sat ripgrep 'pattern' --paths /absolute/path/to/source -- --read /absolute/path/to/source
+sat ripgrep 'pattern' --path /absolute/path/to/source -- --read /absolute/path/to/source
 ```
 
 Defaults grant no filesystem or network access. Host permissions go after `--`.
@@ -17,16 +17,17 @@ Run `python3 external_tools/ripgrep/test.py` to build and verify; use
 `ripgrep` uses upstream grep-regex, grep-searcher, and ignore crates inside
 WASI. It searches granted paths recursively, supports regular expressions,
 literal strings, case-insensitive matching, gitignore filtering, hidden files,
-and context lines. Repeated `--paths` select roots. Use absolute paths explicitly;
+and context lines. Pass one root per `--path`; repeat the flag for multiple roots:
+`--path /project/src --path /project/tests`. Use absolute paths explicitly;
 no host working directory is inherited. `--format json` returns structured
 results. `--max-results` bounds returned lines, including context.
 
 Files whose reads are denied, including hard-linked files rejected by SAT, and
-permission-denied traversal entries are skipped while the search continues.
+entries that cannot be traversed are skipped while the search continues.
 Text output reports the skipped count; JSON includes `skipped_paths`. A nonzero
 count means some paths were not searched; a skipped directory can contain many
 files. Entries hidden by the host policy are not included in this count. Other
-search and traversal errors still fail the call.
+search-processing errors and ignore-rule parsing errors still fail the call.
 
 SAT runs with fuel metering disabled. Legacy package `fuel` values are
 accepted for compatibility and ignored. No host environment or network authority is

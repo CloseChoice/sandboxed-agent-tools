@@ -48,12 +48,7 @@ impl Output {
             text.push_str("[results truncated; increase --max-results or narrow the search]\n");
         }
         if self.skipped_paths > 0 {
-            writeln!(
-                text,
-                "[skipped {} paths: permission denied]",
-                self.skipped_paths
-            )
-            .unwrap();
+            writeln!(text, "[skipped {} paths: inaccessible]", self.skipped_paths).unwrap();
         }
         // SAT supplies the final newline when presenting a WIT string.
         if text.ends_with('\n') {
@@ -109,12 +104,19 @@ impl Sink for Collector<'_> {
     }
 }
 
+fn inaccessible(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound
+    )
+}
+
 struct Ripgrep;
 
 impl Guest for Ripgrep {
     fn run(
         pattern: String,
-        paths: Option<Vec<String>>,
+        path: Option<Vec<String>>,
         ignore_case: bool,
         fixed_strings: bool,
         hidden: bool,
@@ -139,8 +141,11 @@ impl Guest for Ripgrep {
             .line_terminator(Some(b'\n'))
             .build(&pattern)
             .map_err(|_| "invalid or oversized regex pattern")?;
-        let paths = paths.unwrap_or_else(|| vec![".".into()]);
-        if paths.is_empty() || paths.len() > 128 {
+        let mut paths = path.unwrap_or_default();
+        if paths.is_empty() {
+            paths.push(".".into());
+        }
+        if paths.len() > 128 {
             return Err("supply 1..128 search paths".into());
         }
         let mut walker = WalkBuilder::new(&paths[0]);
@@ -168,19 +173,14 @@ impl Guest for Ripgrep {
             .build();
         let mut output = Output::default();
         for entry in walker.build() {
-            // Omit OS error strings, which may contain host paths. Permission
-            // denials skip only the affected entry; unrelated traversal errors fail.
+            // A traversal failure must not prevent searching other entries.
+            // Count it without exposing OS diagnostics or unrelated host paths.
             let entry = match entry {
                 Ok(entry) => entry,
-                Err(error)
-                    if error
-                        .io_error()
-                        .is_some_and(|error| error.kind() == io::ErrorKind::PermissionDenied) =>
-                {
+                Err(_) => {
                     output.skipped_paths += 1;
                     continue;
                 }
-                Err(_) => return Err("cannot traverse search path (missing or denied)".into()),
             };
             if entry.error().is_some() {
                 return Err("cannot read ignore rules".into());
@@ -196,7 +196,7 @@ impl Guest for Ripgrep {
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 match std::fs::metadata(entry.path()) {
                     Ok(metadata) if metadata.is_file() => {}
-                    Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                    Err(error) if inaccessible(&error) => {
                         output.skipped_paths += 1;
                         continue;
                     }
@@ -212,8 +212,9 @@ impl Guest for Ripgrep {
             match searcher.search_path(&matcher, entry.path(), sink) {
                 Ok(()) => {}
                 // The host rejects hard-linked files as well as other denied reads.
+                // Missing entries may also be policy-hidden or removed during traversal.
                 // Keep searching readable files without weakening that protection.
-                Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                Err(error) if inaccessible(&error) => {
                     output.skipped_paths += 1;
                     continue;
                 }

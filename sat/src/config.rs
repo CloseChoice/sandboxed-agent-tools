@@ -18,6 +18,11 @@ pub struct Configuration {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolSettings {
+    /// Per-invocation read patterns and original roots for grant-relative exclusions.
+    #[serde(skip)]
+    pub read_globs: Vec<String>,
+    #[serde(skip)]
+    pub replaced_grants: Vec<String>,
     /// Explicit authority over a debugging endpoint, independent of HTTP grants.
     #[serde(
         default,
@@ -61,6 +66,8 @@ impl Default for HttpPermissions {
 impl Default for ToolSettings {
     fn default() -> Self {
         Self {
+            read_globs: vec![],
+            replaced_grants: vec![],
             cdp_endpoint: None,
             alias: None,
             file_permissions: Default::default(),

@@ -96,7 +96,14 @@ def check(build=True):
         # Neither a sibling write nor a symlink may expand authority.
         denied = sat(['-i', '.secret = "changed"', str(outside)], grants=['--read', str(outside), '--write', str(data_file)])
         assert denied.returncode != 0 and outside.read_text() == '{"secret":"private-value"}'
-        denied = sat(['-i', '.secret = "changed"', 'secret.json'], grants=['--read', str(base), '--write', str(base), '--deny-write', 'secret.json'])
+        config_dir = base / '.sat'
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / 'config.overrides.toml').write_text(
+            '[tools.jaq.file_permissions]\nread = []\nwrite = []\n'
+            'deny-read = []\ndeny-write = ["secret.json"]\n'
+            '[tools.jaq.http_permissions]\nallow-http = []\n'
+        )
+        denied = sat(['-i', '.secret = "changed"', 'secret.json'], grants=['--read', str(base), '--write', str(base)])
         assert denied.returncode != 0 and outside.read_text() == '{"secret":"private-value"}'
         print('jaq: upstream CLI parity and confinement checks passed', flush=True)
 

@@ -6,7 +6,6 @@ world code {
     export run: func(
         operation: string,
         query: option<string>,
-        paths: option<list<string>>,
         path: option<list<string>>,
         exclude: option<list<string>>,
         mode: string,

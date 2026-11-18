@@ -3,9 +3,12 @@
 **This is an early version of what SAT should become one day. Feel free to explore and give feedback. Please don't treat 
 this project as production ready and feature complete.**
 
-SAT provides sandboxing your tools. It provides capabilities to allow read and write to files and http calls on a per-tool-call basis.
+SAT provides sandboxes for tool your agent uses. It provides capabilities to allow read and write to files and http calls on a per-tool-call basis.
 SAT uses [Wasmtime](https://wasmtime.dev/) to run tools compiled to the Webassembly System Interface (WASI) for sandboxing. This means we rely on proven architecture and just provide the glue
 to make sandboxing per tool-call work.
+
+![In the shared sandbox, the agent calls Python and a CLI tool. Both use the same mounted files, and the CLI tool also accesses the web. With SAT, the agent calls each tool in a separate sandbox. Python can read inputs/. The CLI tool can read docs/ and make HTTP requests to api.example.com.](docs/images/sandbox-comparison.png)
+
 Currently there are 5 tools available
 
 SAT is a native host that runs WebAssembly tools with explicit filesystem and
@@ -37,7 +40,90 @@ Release tool archives include `THIRD_PARTY_NOTICES.txt` with the retained
 upstream license texts; SAT keeps this file when registering a tool.
 
 ## What you can link into the sandbox
-Currently we allow 
+Currently we allow the following permissions for the sandboxes:
+- read: grant read access to an existing file or directory. For example, `--read "$PWD/src/*.py"` grants read access to matching regular files directly inside `src`, subject to the configured exclusions.
+  Quote the pattern so SAT expands the filename wildcards (`*` and `?`).
+  Use an absolute path or start it with `$PWD/` for a path relative to the current working directory.
+  In Bash, `--read "$HOME/notes.txt"` also works because Bash expands `$HOME` before invoking SAT. In TOML, use the absolute path for that file.
+- write: grant read and write access to an existing file or directory, e.g. `--write "$PWD/output"`.
+- deny-read: exclude files or directories from reads in the tool's configuration, e.g. `deny-read = ["**/.env"]`.
+- deny-write: exclude files or directories from writes in the tool's configuration, e.g. `deny-write = ["**/*.lock"]`.
+- allow-http: allow HTTP and HTTPS requests to specific hosts, e.g. `--allow-http api.example.com`. Use `--allow-http '*.example.com'` to allow subdomains of `example.com`.
+- deny-http: allow HTTP and HTTPS requests to all hosts except those listed, e.g. `--deny-http api.example.com`. Choose either `allow-http` or `deny-http` for a tool call.
+
+
+## Getting Started
+
+The installers download published GitHub Release assets and verify their SHA-256
+checksums. These URLs become available after the first release is published.
+
+### Linux and macOS
+
+Install SAT and the five default tools (`python`, `jaq`, `code`, `markitdown`, `ripgrep`):
+
+```sh
+curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.sh | bash -s -- default-tools
+```
+
+Or select tools and an exact release version:
+
+```sh
+curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.sh | bash -s -- python,jaq --version 0.1.0
+```
+
+Omit the tool argument to install only SAT. The script detects Linux x64,
+Intel macOS, or Apple Silicon macOS. Override detection with
+`--platform linux-x64`, `macos-x64`, or `macos-arm64`.
+
+SAT is installed to `~/.local/bin`; change this with `--bin-dir DIRECTORY`.
+If needed, add that directory to your shell's PATH:
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Add the [SAT skill](skills/sandboxed-agent-tools/SKILL.md) to your agent so it can choose among the five default tools and grant permissions per call.
+From a checkout of this repository, copy the skill into your harness’s skills directory. For example, Pi discovers skills in `~/.agents/skills/`:
+
+```sh
+mkdir -p "$HOME/.agents/skills"
+cp -R skills/sandboxed-agent-tools "$HOME/.agents/skills/"
+```
+
+### Windows PowerShell
+
+Install the Windows x64 host and all five tools:
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.ps1"))) -Tools "default-tools"
+```
+
+For an exact version and selected tools:
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.ps1"))) -Tools "python,jaq" -Version "0.1.0"
+```
+
+Omit `-Tools` to install only SAT. The default binary directory is
+`$env:LOCALAPPDATA\SAT\bin`; override it with `-BinDir DIRECTORY`.
+The script prints the command to add this directory to the current session's
+PATH. Add it to your user PATH for future sessions.
+
+Both scripts accept versions with or without the `v` prefix, including
+prereleases such as `0.1.0-rc.1`. For a prerelease, use its explicit version
+and versioned script URL. Omitting the version selects GitHub's latest release.
+Download URLs are derived from the tag and asset name, so publishing another
+version requires no URL edits in either script.
+
+New tools start with no filesystem or HTTP permissions. Existing project and
+global permission settings are kept. After installation, `sat init` writes a
+project configuration you can edit.
+
+You can also register a tool archive manually:
+
+```sh
+sat register <path-to-tar>
+```
 
 ## Permission limitations
 
@@ -85,6 +171,9 @@ There are two ways how to control what permissions your tools get:
 ### SAT's CLI Interface
 
 #### File Permissions
+
+SAT expands quoted read globs once per invocation. It skips symlinks and directories and grants the matched files individually. The call fails if a pattern matches no permitted files, or if expansion across all patterns exceeds 128 matches or 65,536 directory entries scanned. Use exact paths in configuration and for write grants.
+
 Run a tool via 
 ```bash
 sat <toolname> toolarg1 toolarg2 --toolkwarg1 -- --read <file_or_dir1> --read <file_or_dir2> --read <file_or_dir3> --write <file_or_dir4>
@@ -135,7 +224,7 @@ allow-http = ["example.com", "httpbin.org"]
 
 # we omit more examples here, the general pattern is
 # [tools.<toolname>.file_permissions]
-# read = ["$PWD/some_path", "$SAT_HOME/some_other_path", "/some_absolute_path"]
+# read = ["$PWD/some_path", "/some_absolute_path"]
 # write = []
 # deny-read = []
 # deny-write = []
@@ -148,9 +237,8 @@ allow-http = ["example.com", "httpbin.org"]
 Before adding a write grant, follow the [configuration and ancestor-directory
 restrictions](#permission-limitations) above.
 `deny-read` and `deny-write` contain exclusion globs. Empty lists grant no
-access. Filesystem grant paths must exist and be absolute or start with the
-literal `$PWD/` or `$SAT_HOME/`; SAT resolves these placeholders when a tool
-runs.
+access. Filesystem grant paths must exist. Use an absolute path or prefix a
+project-relative path with `$PWD/`, which SAT resolves when the tool runs.
 
 `allow-http` lists permitted hostnames, without a scheme, port, or path.
 An empty allowlist denies all HTTP requests. Redirect destinations need their
@@ -164,71 +252,6 @@ existing file while preserving its project overrides. Use `sat config` or
 `sat config python` to inspect the effective settings. CLI permission flags
 after `--` override the corresponding lists for that invocation.
 
-
-## Getting Started
-
-The installers download published GitHub Release assets and verify their SHA-256
-checksums. These URLs become available after the first release is published.
-
-### Linux and macOS
-
-Install SAT and the five default tools (`python`, `jaq`, `code`, `markitdown`, `ripgrep`):
-
-```sh
-curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.sh | bash -s -- default-tools
-```
-
-Or select tools and an exact release version:
-
-```sh
-curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.sh | bash -s -- python,jaq --version 0.1.0
-```
-
-Omit the tool argument to install only SAT. The script detects Linux x64,
-Intel macOS, or Apple Silicon macOS. Override detection with
-`--platform linux-x64`, `macos-x64`, or `macos-arm64`.
-
-SAT is installed to `~/.local/bin`; change this with `--bin-dir DIRECTORY`.
-If needed, add that directory to your shell's PATH:
-
-```sh
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-### Windows PowerShell
-
-Install the Windows x64 host and all five tools:
-
-```powershell
-& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.ps1"))) -Tools "default-tools"
-```
-
-For an exact version and selected tools:
-
-```powershell
-& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.ps1"))) -Tools "python,jaq" -Version "0.1.0"
-```
-
-Omit `-Tools` to install only SAT. The default binary directory is
-`$env:LOCALAPPDATA\SAT\bin`; override it with `-BinDir DIRECTORY`.
-The script prints the command to add this directory to the current session's
-PATH. Add it to your user PATH for future sessions.
-
-Both scripts accept versions with or without the `v` prefix, including
-prereleases such as `0.1.0-rc.1`. For a prerelease, use its explicit version
-and versioned script URL. Omitting the version selects GitHub's latest release.
-Download URLs are derived from the tag and asset name, so publishing another
-version requires no URL edits in either script.
-
-New tools start with no filesystem or HTTP permissions. Existing project and
-global permission settings are kept. After installation, `sat init` writes a
-project configuration you can edit.
-
-You can also register a tool archive manually:
-
-```sh
-sat register <path-to-tar>
-```
 
 ## Build your own Tools
 
@@ -365,6 +388,14 @@ Unlike a resource handle, this record passes data by value; the pixel buffer may
 
 Wasmtime supports per-call execution limits through [fuel metering](https://docs.wasmtime.dev/examples-interrupting-wasm.html#deterministic-fuel) and [epoch-based interruption](https://docs.wasmtime.dev/examples-interrupting-wasm.html#non-deterministic-epochs). Early experimentation showed that more work needs to be put into this area before adding it to SAT.
 
+## Performance Considerations
+
+Running tools in a sandbox can add overhead. In our early trials, the agent
+workflow that included the `code` tool took longer than its native-tools
+baseline. In trials without `code`, the workflow ran in about the same time
+as its baseline. We need more measurements to understand how much the sandbox,
+the tools the agent chooses, and the workload each contribute to runtime.
+
 ## Local Development: Build and use
 
 Build the host with the repository's pinned Rust toolchain:
@@ -410,8 +441,10 @@ README for its interface and limitations.
 
 SAT caches compiled components under `$SAT_HOME/.cache` (default
 `~/.sat/.cache`). Registration validates and compiles the component. Cache
-entries depend on component content and engine configuration. Guests cannot
-access SAT's registry/cache, even through a broader filesystem grant.
+entries depend on component content and engine configuration. SAT blocks
+direct access to its registry and cache. Keep their parent directories and
+all other ancestors outside tool write grants, as described in
+[Permission limitations](#permission-limitations).
 
 ## Checks
 

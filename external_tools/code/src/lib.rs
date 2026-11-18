@@ -8,7 +8,6 @@ impl Guest for Code {
     fn run(
         operation: String,
         query: Option<String>,
-        paths: Option<Vec<String>>,
         path: Option<Vec<String>>,
         exclude: Option<Vec<String>>,
         mode: String,
@@ -21,8 +20,7 @@ impl Guest for Code {
         format: String,
         extract: String,
     ) -> Result<String, String> {
-        let mut roots = paths.unwrap_or_default();
-        roots.extend(path.unwrap_or_default());
+        let mut roots = path.unwrap_or_default();
         if roots.is_empty() {
             roots.push(".".into());
         }

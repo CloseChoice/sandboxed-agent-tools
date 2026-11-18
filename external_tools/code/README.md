@@ -3,7 +3,7 @@
 ```sh
 bash external_tools/code/package.sh  # tar (default) or zip
 sat register external_tools/code/dist/code.tar
-sat code outline --paths /absolute/path/to/source.rs -- --read /absolute/path/to/source.rs
+sat code outline --path /absolute/path/to/source.rs -- --read /absolute/path/to/source.rs
 ```
 
 Defaults grant no filesystem or network access. Host permissions go after `--`.
@@ -16,7 +16,7 @@ Run `python3 external_tools/code/test.py` to build and verify; use
 
 `code` embeds Tree-sitter's C runtime and the Python, Rust, JavaScript/JSX,
 TypeScript, and TSX grammars. It supports `search`, `outline`, `read-symbol`, and
-`read-enclosing`. Repeated `--paths` select granted files or directories.
+`read-enclosing`. Repeated `--path` flags select granted files or directories.
 Search modes are literal text and regex; extraction supports full definitions,
 signatures, and signatures with documentation. `--format json` includes source
 ranges, hashes, hit locations, and parse status. Use `--max-results` for previews.
@@ -33,8 +33,9 @@ inherited.
 
 ## Path selectors
 
-`--path` and `--paths` accept the same repeatable selectors; values from both
-options are combined (union). Quote patterns to prevent shell expansion.
+Pass one selector per `--path`; repeat the flag for multiple selectors:
+`--path /project/src --path /project/lib`. Selectors are combined (union).
+Quote patterns to prevent shell expansion.
 
 ```sh
 sat code outline --path '/project/src/**/*.ts' --path '/project/lib/**/*.tsx' --exclude '**/*.test.ts' -- --read /project/src --read /project/lib

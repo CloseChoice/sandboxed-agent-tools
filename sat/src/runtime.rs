@@ -358,7 +358,7 @@ impl LoadedTool {
                     "tool": self.metadata,
                     "parameters": self.params.iter().map(|(name,t)| json!({"name":name,"type":format!("{t:?}")})).collect::<Vec<_>>(),
                     "resources": self.filesystem_imports, "uses_http": self.uses_http,
-                    "permissions": ["--read", "--write", "--deny-read", "--deny-write", "--allow-http", "--deny-http"],
+                    "permissions": ["--read", "--write", "--allow-http", "--deny-http"],
                 }))?
             );
             return Ok(());
@@ -425,7 +425,7 @@ impl LoadedTool {
                 }
             })
             .collect::<Result<Vec<_>>>()?;
-        let access = crate::access::Access::new(&settings.file_permissions, home, cwd)?;
+        let access = crate::access::Access::for_invocation(settings, home, cwd)?;
         let mut bindings = files::FilesystemBindings::new();
         for filesystem_import in &self.filesystem_imports {
             bindings.insert(

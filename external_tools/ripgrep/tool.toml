@@ -8,8 +8,8 @@ fuel = 1000000000
 name = "pattern"
 help = "Regex pattern (or literal text with --fixed-strings true)."
 
-[options.paths]
-help = "Guest file or directory to search. Repeat for multiple roots. Use absolute paths and grant read access after --."
+[options.path]
+help = "File or directory to search. Repeat --path for each root: --path /src --path /tests. Use absolute paths and grant read access after --."
 
 [options.format]
 default = "text"

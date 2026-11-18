@@ -1,10 +1,20 @@
 //! Handle the file access. This file is mostly about resolving and cleaning paths
-use crate::config::FilePermissions;
+use crate::config::{FilePermissions, ToolSettings};
 use anyhow::{Context, Result, ensure};
-use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt, OpenOptionsSyncExt};
 use cap_std::fs::{Dir, OpenOptions};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
+
+const MAX_GLOB_FILES: usize = 128;
+const MAX_GLOB_ENTRIES: usize = 65_536;
+
+pub fn is_read_glob(path: &Path) -> bool {
+    path.components().any(
+        |part| matches!(part, Component::Normal(s) if s.to_string_lossy().contains(['*', '?'])),
+    )
+}
 
 #[derive(Clone)]
 pub struct FilesystemGrant {
@@ -12,6 +22,25 @@ pub struct FilesystemGrant {
     pub guest: String,
     pub write: bool,
     pub directory: bool,
+    // Keep the file selected during enumeration pinned for both WASI and named imports.
+    glob_file: Option<Arc<std::fs::File>>,
+}
+
+impl FilesystemGrant {
+    pub fn open_file(&self, write: bool) -> Result<std::fs::File> {
+        let file = match &self.glob_file {
+            Some(file) => {
+                ensure!(!write, "glob grants are read-only");
+                file.try_clone()?
+            }
+            None => std::fs::OpenOptions::new()
+                .read(true)
+                .write(write)
+                .open(&self.path)?,
+        };
+        check_file(&file)?;
+        Ok(file)
+    }
 }
 
 #[derive(Clone)]
@@ -20,6 +49,7 @@ pub struct Access {
     deny_read: GlobSet,
     deny_write: GlobSet,
     protected_home: PathBuf,
+    exclusion_roots: Vec<(PathBuf, bool)>,
 }
 
 pub fn match_patterns(patterns: &[String]) -> Result<GlobSet> {
@@ -110,15 +140,114 @@ impl Access {
                     path: canonical_path,
                     write,
                     directory: meta.is_dir(),
+                    glob_file: None,
                 });
             }
         }
         Ok(Self {
             grants,
+            exclusion_roots: Vec::new(),
             protected_home: std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf()),
             deny_read: match_patterns(&settings.deny_read)?,
             deny_write: match_patterns(&settings.deny_write)?,
         })
+    }
+
+    pub fn for_invocation(settings: &ToolSettings, home: &Path, cwd: &Path) -> Result<Self> {
+        let mut access = Self::new(&settings.file_permissions, home, cwd)?;
+        if !access.deny_read.is_empty() || !access.deny_write.is_empty() {
+            // Narrowing a configured directory to a file must preserve the directory's
+            // coordinate system for exclusion patterns such as "private/*.py".
+            for value in &settings.replaced_grants {
+                let path = expand_path(value, home, cwd)?;
+                match std::fs::metadata(&path) {
+                    Ok(meta) => access
+                        .exclusion_roots
+                        .push((std::fs::canonicalize(path)?, meta.is_dir())),
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        }
+        access.add_read_globs(&settings.read_globs, home, cwd)?;
+        Ok(access)
+    }
+
+    fn add_read_globs(&mut self, patterns: &[String], home: &Path, cwd: &Path) -> Result<()> {
+        let mut scanned = 0;
+        let mut matched = 0;
+        for value in patterns {
+            let raw = Path::new(value);
+            let pattern = raw
+                .file_name()
+                .and_then(|s| s.to_str())
+                .context("expected a filename glob")?;
+            ensure!(
+                pattern.contains(['*', '?'])
+                    && !pattern.contains("**")
+                    && !is_read_glob(raw.parent().context("expected a glob parent")?),
+                "read globs support * and ? only in the filename"
+            );
+            let path = expand_path(value, home, cwd)?;
+            let parent = path.parent().context("read glob requires a directory")?;
+            let root = parent.ancestors().last().unwrap();
+            let relative = parent.strip_prefix(root)?;
+            // Derive the policy path from the same no-follow traversal as the handle.
+            let canonical_parent = std::fs::canonicalize(root)?.join(relative);
+            ensure!(
+                canonical_parent == std::fs::canonicalize(parent)?,
+                "use the canonical directory for a read glob"
+            );
+            let mut dir = Dir::open_ambient_dir(root, cap_std::ambient_authority())?;
+            for component in relative.components() {
+                dir = dir.open_dir_nofollow(component.as_os_str())?;
+            }
+            let escaped = globset::escape(pattern)
+                .replace("[*]", "*")
+                .replace("[?]", "?");
+            let matcher = GlobBuilder::new(&escaped)
+                .backslash_escape(false)
+                .build()?
+                .compile_matcher();
+            let before = matched;
+            for entry in dir.entries()? {
+                scanned += 1;
+                ensure!(
+                    scanned <= MAX_GLOB_ENTRIES,
+                    "read globs exceed the directory entry limit ({MAX_GLOB_ENTRIES})"
+                );
+                let entry = entry?;
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else { continue };
+                if name.contains('\\') || !matcher.is_match(name) || !entry.file_type()?.is_file() {
+                    continue;
+                }
+                let path = canonical_parent.join(name);
+                if self.deny_read.is_match(name) || self.denied(&path, false) {
+                    continue;
+                }
+                matched += 1;
+                ensure!(
+                    matched <= MAX_GLOB_FILES,
+                    "read globs exceed the match limit ({MAX_GLOB_FILES})"
+                );
+                if self.grants.iter().any(|grant| grant.path == path) {
+                    continue;
+                }
+                self.grants.push(FilesystemGrant {
+                    path,
+                    guest: convert_to_guest_path(&parent.join(name))?,
+                    directory: false,
+                    write: false,
+                    glob_file: Some(Arc::new(open_file(&dir, name, false, false)?)),
+                });
+            }
+            ensure!(
+                matched > before,
+                "read glob matched no permitted regular files: {value}"
+            );
+        }
+        Ok(())
     }
 
     pub fn denied(&self, path: &Path, write: bool) -> bool {
@@ -132,24 +261,25 @@ impl Access {
         } else {
             &self.deny_read
         };
-        self.grants.iter().any(|grant| {
-            let relative = if grant.directory {
-                let Ok(relative) = path.strip_prefix(&grant.path) else {
-                    return false;
-                };
-                relative.to_path_buf()
-            } else if path == grant.path {
-                PathBuf::from(path.file_name().unwrap())
+        let matches_relative = |relative: &Path| {
+            relative
+                .ancestors()
+                .any(|p| !p.as_os_str().is_empty() && patterns.is_match(p))
+        };
+        let matches_root = |root: &Path, directory: bool| {
+            if directory {
+                path.strip_prefix(root).is_ok_and(matches_relative)
             } else {
-                return false;
-            };
-            // Denying a directory also denies its descendants.
-            let mut prefix = PathBuf::new();
-            relative.components().any(|c| {
-                prefix.push(c);
-                patterns.is_match(&prefix)
-            })
-        })
+                root == path && path.file_name().is_some_and(|name| patterns.is_match(name))
+            }
+        };
+        self.exclusion_roots
+            .iter()
+            .any(|(root, dir)| matches_root(root, *dir))
+            || self
+                .grants
+                .iter()
+                .any(|grant| matches_root(&grant.path, grant.directory))
     }
 
     pub fn authorize(&self, path: &Path, write: bool) -> Result<()> {
@@ -228,7 +358,8 @@ pub fn open_file(
         .read(true)
         .write(write)
         .create(create)
-        .follow(FollowSymlinks::No);
+        .follow(FollowSymlinks::No)
+        .nonblock(true);
     let file = dir.open_with(name, &options)?.into_std();
     check_file(&file)?;
     Ok(file)
@@ -264,6 +395,83 @@ pub fn check_file(file: &std::fs::File) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::cli::apply_permission_overrides;
+
+    fn read_globs(cwd: &Path, patterns: &[&str]) -> Result<Access> {
+        let mut settings = ToolSettings::default();
+        settings.file_permissions.read.push("$PWD".into());
+        settings
+            .file_permissions
+            .deny_read
+            .push("src/private*.py".into());
+        let mut args = vec!["--".to_owned()];
+        for pattern in patterns {
+            args.extend(["--read".to_owned(), (*pattern).to_owned()]);
+        }
+        apply_permission_overrides(&args, &mut settings)?;
+        Access::for_invocation(&settings, &cwd.join("registry"), cwd)
+    }
+
+    #[test]
+    fn glob_grants_only_matching_permitted_files() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let cwd = temp.path().canonicalize()?;
+        let src = cwd.join("src");
+        std::fs::create_dir(&src)?;
+        for name in ["main.py", "notes.txt", "private1.py"] {
+            std::fs::write(src.join(name), name)?;
+        }
+        std::fs::create_dir(src.join("folder.py"))?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(src.join("notes.txt"), src.join("linked.py"))?;
+
+        let access = read_globs(&cwd, &["$PWD/src/*.py", "$PWD/src/mai?.py"])?;
+        assert_eq!(access.grants.len(), 1);
+        let main = src.join("main.py");
+        access.authorize(&main, false)?;
+        assert!(access.authorize(&main, true).is_err());
+        assert!(access.authorize(&src, false).is_err());
+        std::fs::write(src.join("late.py"), "")?;
+        for name in [
+            "notes.txt",
+            "private1.py",
+            "linked.py",
+            "folder.py",
+            "late.py",
+        ] {
+            assert!(access.authorize(&src.join(name), false).is_err(), "{name}");
+        }
+        #[cfg(unix)]
+        {
+            // Both filesystem interfaces consume the handle selected at expansion.
+            use std::io::Read;
+            std::fs::remove_file(&main)?;
+            std::os::unix::fs::symlink(src.join("notes.txt"), &main)?;
+            let mut contents = String::new();
+            access.grants[0]
+                .open_file(false)?
+                .read_to_string(&mut contents)?;
+            assert_eq!(contents, "main.py");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_or_excessive_globs_fail_the_invocation() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let cwd = temp.path().canonicalize()?;
+        for pattern in ["$PWD/*.py", "$PWD/**/*.py", "$PWD/*/name.py", "$PWD/**.py"] {
+            assert!(read_globs(&cwd, &[pattern]).is_err(), "{pattern}");
+        }
+        for i in 0..=MAX_GLOB_FILES {
+            std::fs::write(cwd.join(format!("{i}.py")), "")?;
+        }
+        let result = read_globs(&cwd, &["$PWD/*.py"]);
+        assert!(result.err().unwrap().to_string().contains("match limit"));
+        Ok(())
+    }
+
     #[test]
     fn hardlinks_cannot_bypass_path_permissions() {
         let directory = tempfile::tempdir().unwrap();

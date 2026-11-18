@@ -36,11 +36,7 @@ pub fn configure_preopens(
         if grant.directory {
             wasi.preopened_dir(&grant.path, &grant.guest, perms)?;
         } else {
-            let file = std::fs::OpenOptions::new()
-                .read(true)
-                .write(grant.write)
-                .open(&grant.path)?;
-            crate::access::check_file(&file)?;
+            let file = grant.open_file(grant.write)?;
             files.push((File::new(file, perms, mode, false), grant.guest.clone()));
         }
     }

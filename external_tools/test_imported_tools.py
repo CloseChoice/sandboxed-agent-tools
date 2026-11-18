@@ -60,14 +60,22 @@ def check(name, build=True):
             assert sentinel.read_text() == 'trusted host cache' 
         elif name in ['code', 'ripgrep']:
             args = ['outline'] if name == 'code' else ['needle']
-            assert (b'hello' if name == 'code' else b'needle') in invoke(command, *args, '--paths', source, '--', '--read', source).stdout
+            assert b'--path /src --path /tests' in invoke(command, '--help').stdout
+            assert b'--paths' not in invoke(command, '--help').stdout
+            invoke(command, *args, '--paths', source, '--', '--read', source, ok=False)
+            assert (b'hello' if name == 'code' else b'needle') in invoke(command, *args, '--path', source, '--', '--read', source).stdout
             # Searchers may report an inaccessible root as an empty result.
             for denied in [source, outside]:
                 grants = [] if denied == source else ['--', '--read', source]
-                result = subprocess.run([*SAT_COMMAND, command, *args, '--paths', str(denied), *map(str, grants)], cwd=base, env=env, capture_output=True, timeout=180)
+                result = subprocess.run([*SAT_COMMAND, command, *args, '--path', str(denied), *map(str, grants)], cwd=base, env=env, capture_output=True, timeout=180)
                 assert b'def secret' not in result.stdout and b'def hello' not in result.stdout
                 assert b'outside_secret' not in result.stdout and b'needle' not in result.stdout
-            assert (b'hello' if name == 'code' else b'needle') in invoke(command, *args, '--paths', source, '--paths', source, '--', '--read', source).stdout
+            second = base / 'second.py'
+            second.write_text('def other():\n    return "needle second"\n')
+            expected = [b'hello', b'other'] if name == 'code' else [b'return "needle"', b'return "needle second"']
+            output = invoke(command, *args, '--path', source, '--path', second,
+                            '--', '--read', source, '--read', second).stdout
+            assert all(value in output for value in expected), output
         else:
             image = base / 'pixel.png'
             image.write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='))
@@ -89,8 +97,15 @@ def check(name, build=True):
             protected = base / 'protected.txt'
             protected.write_text('needle hard-linked secret\n')
             os.link(protected, directory / 'linked.txt')
-            search = [command, 'needle', '--paths', directory]
-            grants = ['--', '--read', directory, '--deny-read', '**/denied.txt']
+            search = [command, 'needle', '--path', directory]
+            config_dir = base / '.sat'
+            config_dir.mkdir(exist_ok=True)
+            (config_dir / 'config.overrides.toml').write_text(
+                '[tools.ripgrep.file_permissions]\nread = []\nwrite = []\n'
+                'deny-read = ["**/denied.txt"]\ndeny-write = []\n'
+                '[tools.ripgrep.http_permissions]\nallow-http = []\n'
+            )
+            grants = ['--', '--read', directory]
             result = json.loads(invoke(*search, '--format', 'json', *grants).stdout)
             # Explicit deny-read entries are hidden during traversal; the hard link
             # is visible but its open is denied, so only that file is counted.
@@ -98,12 +113,12 @@ def check(name, build=True):
             assert not result['truncated'], result
             assert {row['text'] for row in result['results']} == {'needle before', 'needle after'}, result
             text = invoke(*search, *grants).stdout
-            assert b'[skipped 1 paths: permission denied]' in text, text
+            assert b'[skipped 1 paths: inaccessible]' in text, text
             assert b'secret' not in text, text
             assert protected.read_text() == 'needle hard-linked secret\n'
             # A denied traversal root must not prevent searching another root.
-            roots = json.loads(invoke(command, 'needle', '--paths', protected,
-                                      '--paths', directory / 'a-readable.txt',
+            roots = json.loads(invoke(command, 'needle', '--path', protected,
+                                      '--path', directory / 'a-readable.txt',
                                       '--format', 'json', '--', '--read', directory).stdout)
             assert roots['skipped_paths'] == 1, roots
             assert [row['text'] for row in roots['results']] == ['needle before'], roots
@@ -114,7 +129,7 @@ def check(name, build=True):
             if name == 'uutils':
                 args = [command, 'cat', link]
             else:
-                args = [command, *(['outline'] if name == 'code' else ['outside_secret']), '--paths', link]
+                args = [command, *(['outline'] if name == 'code' else ['outside_secret']), '--path', link]
             result = subprocess.run([*SAT_COMMAND, *map(str, args), '--', '--read', str(source)], cwd=base, env=env, capture_output=True, timeout=180)
             assert b'outside_secret' not in result.stdout
     print(f'{name}: archive, execution, and confinement checks passed')
