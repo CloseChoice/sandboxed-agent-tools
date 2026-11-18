@@ -36,6 +36,21 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "release tag"):
             release.validate(self.root, "v0.2.0")
 
+    def test_prerelease_tag_can_extend_the_stable_host_version(self):
+        self.assertEqual(release.validate(self.root, "v0.1.0-dev.1"), ("0.1.0", ["python"]))
+        for tag in ("v0.1.01", "v0.1.0-", "v0.1.0-dev..1", "v0.1.0-dev.01", "v0.1.0-dev/1"):
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "release tag"):
+                release.validate(self.root, tag)
+
+    def test_prerelease_cargo_version_requires_its_exact_tag(self):
+        version = "0.1.0-rc.1"
+        self.write("sat/Cargo.toml", f'[package]\nname="sat"\nversion="{version}"\n')
+        self.write("sat/Cargo.lock", f'[[package]]\nname="sat"\nversion="{version}"\n')
+        self.assertEqual(release.validate(self.root, f"v{version}"), (version, ["python"]))
+        for tag in ("v0.1.0", "v0.1.0-rc.2"):
+            with self.subTest(tag=tag), self.assertRaisesRegex(ValueError, "release tag"):
+                release.validate(self.root, tag)
+
     def test_lockfile_must_match(self):
         self.write("sat/Cargo.lock", '[[package]]\nname="sat"\nversion="0.2.0"\n')
         with self.assertRaisesRegex(ValueError, "Cargo.lock"):

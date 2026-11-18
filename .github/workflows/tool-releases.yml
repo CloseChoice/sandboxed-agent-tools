@@ -26,6 +26,9 @@ on:
 permissions:
   contents: read
 
+env:
+  SAT_RELEASE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+
 concurrency:
   group: tool-releases-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
