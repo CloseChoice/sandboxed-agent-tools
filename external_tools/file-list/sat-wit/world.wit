@@ -1,0 +1,4 @@
+package sat:file-list@0.1.0;
+world file-list {
+    export run: func(directory: string, file: string) -> result<string, string>;
+}

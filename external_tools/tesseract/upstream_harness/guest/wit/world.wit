@@ -1,0 +1,4 @@
+package sat:tesseract-upstream-test@0.1.0;
+world upstream-test {
+    export run: func(args: list<string>) -> s32;
+}

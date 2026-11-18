@@ -1,0 +1,12 @@
+name = "pdftools"
+version = "0.1.0"
+description = "Convert PNG/JPEG images to PDF and merge PDFs from granted folders."
+entrypoint = "run"
+exactly_one_of = ["convert", "merge"]
+fuel = 1000000000
+
+[options.convert]
+help = "Image file or directory to add to the PDF. Repeat to append more inputs in order."
+
+[options.merge]
+help = "Merge the PDF files in this directory in filename order."

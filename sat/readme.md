@@ -18,7 +18,7 @@ implementation. Default settings request no inherited stdio, environment,
 directories or network access. These are data definitions, not enforced security
 boundaries. Clock and randomness settings are outside the current configuration.
 
-The sibling `fuzzy-search` package already contains a component host example and
+The `external_tools/fuzzy-search` package already contains a component host example and
 tests for typed exports. It is not integrated into SAT's runtime.
 
 ## Next milestone: run a directory-listing component

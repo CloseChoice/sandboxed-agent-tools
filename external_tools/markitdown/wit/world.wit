@@ -1,0 +1,5 @@
+package sat:markitdown@0.1.9;
+
+world markitdown-cli {
+    export run: func(args: list<string>) -> s32;
+}

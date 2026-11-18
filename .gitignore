@@ -16,3 +16,26 @@ dist/
 
 # Local editor logs
 nvim.log
+
+# Python test bytecode
+__pycache__/
+
+# tar/zip
+*.zip
+*.tar
+*.tar.gz
+
+# Local credentials, sample inputs, agent logs, and research checkouts
+/keys.md
+/data/
+/codex/
+/experiments/
+/repos/
+
+# Generated JavaScript dependencies and test reports
+node_modules/
+test-results/
+
+# Generated Python packaging probes
+/python-venv-test-package/
+*.egg-info/

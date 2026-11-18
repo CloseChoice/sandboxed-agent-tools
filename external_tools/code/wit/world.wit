@@ -1,0 +1,21 @@
+package sat:code@0.2.0;
+
+world code {
+    // Standard WASI filesystem imports come from Rust's wasip2 target.
+    // The host grants authority; all results return through WIT.
+    export run: func(
+        operation: string,
+        query: option<string>,
+        path: option<list<string>>,
+        exclude: option<list<string>>,
+        mode: string,
+        context: string,
+        position: option<u32>,
+        include-docs: bool,
+        include-parent-signature: bool,
+        max-results: u32,
+        max-bytes: u32,
+        format: string,
+        extract: string,
+    ) -> result<string, string>;
+}

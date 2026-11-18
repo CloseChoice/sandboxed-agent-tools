@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>SAT browser laboratory</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#10191e;color:#e7f0ee;font:17px system-ui}main{max-width:960px;margin:60px auto;padding:0 30px}.eyebrow{color:#8de0bc;letter-spacing:.16em;font-size:12px}h1{font-size:48px;letter-spacing:-2px;margin:12px 0}p{color:#a4b9b5;line-height:1.6}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.card{background:#1b292f;border:1px solid #34494d;padding:26px;border-radius:16px}h2{margin-top:0;font-size:22px}button,input,textarea,select{font:inherit;border-radius:8px;border:1px solid #526c70;padding:12px}button{background:#9be5bd;color:#102b22;cursor:pointer}input,textarea,select{display:block;width:100%;margin:10px 0 16px;background:#101c22;color:inherit}#counter{font-size:56px;display:block;margin:10px 0}#status{min-height:30px;color:#9be5bd}.muted{font-size:13px;color:#a4b9b5}#editable{padding:12px;border:1px dashed #526c70;margin-top:15px}.tools{margin-top:20px;display:flex;gap:10px;flex-wrap:wrap}.tools button{background:#2e454b;color:#e7f0ee}#covered-wrap{position:relative;display:inline-block}#overlay{position:absolute;inset:0;background:rgba(0,0,0,.2)}iframe{width:100%;height:100px;border:1px solid #526c70;margin-top:20px}.spacer{height:700px}footer{padding:25px;border-top:1px solid #34494d}
+</style>
+<main><span class="eyebrow">SANDBOXED AGENT TOOLS / REAL BROWSER TEST</span>
+<h1>Browser laboratory</h1><p>A stateful app for exercising trusted input, asynchronous updates, page inspection and diagnostics.</p>
+<div class="grid"><section class="card"><h2>Counter</h2><output id="counter">0</output><button id="increment">Increment</button><p class="muted">The page records whether input came from a real browser event.</p><div id="delayed" hidden>Delayed content is ready</div></section>
+<section class="card"><h2>Save a note</h2><form id="form"><label for="name">Your name</label><input id="name" placeholder="Ada Lovelace"><label for="note">Note</label><textarea id="note"></textarea><button id="save">Save note</button></form><div id="status" role="status">Ready</div><div id="editable" contenteditable="true">Edit me</div></section></div>
+<div class="tools"><button id="failure">Request failure</button><button id="network-failure">Connection failure</button><button id="exception">JavaScript error</button><button id="disabled" disabled>Disabled button</button><span id="covered-wrap"><button id="covered">Covered button</button><span id="overlay"></span></span></div>
+<div id="shadow"></div><iframe id="frame" src="/frame" title="Child frame"></iframe>
+<div class="spacer"></div><footer><button id="bottom">Bottom of page</button></footer></main>
+<script>
+window.lab={clicks:0,trusted:false,inputEvents:0,submits:0};
+increment.onclick=e=>{lab.trusted=e.isTrusted;counter.textContent=++lab.clicks};
+document.querySelector('#name').addEventListener('input',()=>lab.inputEvents++);
+form.onsubmit=async e=>{e.preventDefault();lab.submits++;statusEl.textContent='Saving…';const r=await fetch('/api/save',{method:'POST',body:JSON.stringify({name:document.querySelector('#name').value,note:note.value})});const data=await r.json();statusEl.textContent='Saved: '+data.name;console.log('note saved',data.name)};
+const statusEl=document.querySelector('#status');
+failure.onclick=()=>fetch('/api/fail').then(r=>console.error('save request failed',r.status));
+document.querySelector('#network-failure').onclick=()=>fetch('/api/drop').catch(e=>console.error('connection failed'));
+exception.onclick=()=>{throw new Error('laboratory intentional exception')};
+const root=document.querySelector('#shadow').attachShadow({mode:'open'});root.innerHTML='<button id="shadow-button" style="padding:15px;margin-top:20px">Shadow action</button><span id="shadow-result">Not clicked</span>';root.querySelector('button').onclick=()=>root.querySelector('span').textContent='Shadow clicked';
+setTimeout(()=>document.querySelector('#delayed').hidden=false,300);
+</script></html>
