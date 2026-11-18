@@ -1,0 +1,8 @@
+[file_permissions]
+read = []
+write = []
+deny-read = []
+deny-write = []
+
+[http_permissions]
+allow-http = []

@@ -1,0 +1,330 @@
+name: Build and release SAT
+
+on:
+  pull_request:
+    paths:
+      - 'external_tools/**'
+      - 'sat/**'
+      - 'rust-toolchain.toml'
+      - 'scripts/**'
+      - 'install.sh'
+      - 'install.ps1'
+      - '.github/workflows/tool-releases.yml'
+  push:
+    branches: ['**']
+    tags: ['v*']
+    paths:
+      - 'external_tools/**'
+      - 'sat/**'
+      - 'rust-toolchain.toml'
+      - 'scripts/**'
+      - 'install.sh'
+      - 'install.ps1'
+      - '.github/workflows/tool-releases.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tool-releases-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  versions:
+    name: Check release versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tools: ${{ steps.selection.outputs.tools }}
+      hosts: ${{ steps.selection.outputs.hosts }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Test release selection and versions
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Check Cargo, lockfile, and tool metadata versions
+        run: python3 scripts/release.py
+      - name: Select release tools
+        id: selection
+        run: |
+          echo "tools=$(python3 scripts/release.py --matrix)" >> "$GITHUB_OUTPUT"
+          echo "hosts=$(python3 scripts/host_release.py matrix)" >> "$GITHUB_OUTPUT"
+      - name: Require the pushed tag to match the bundle version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/release.py --check-tag "$RELEASE_TAG"
+
+  build:
+    name: Build ${{ matrix.tool }}
+    needs: versions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: ${{ fromJSON(needs.versions.outputs.tools) }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      TOOL: ${{ matrix.tool }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install the repository Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustup target add wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.tool != 'python' && matrix.tool != 'markitdown'
+        with:
+          workspaces: external_tools/${{ matrix.tool }} -> target
+          key: tools-${{ matrix.tool }}-wasi-sdk-34
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Install verified WASI SDK for C/C++ tools
+        if: matrix.tool == 'code'
+        env:
+          SDK_SHA256: b761e3a0721dbae9c09a0059e5fdb2bf917d1b4a8a7b430fb3b5aafb0984b2c4
+        run: |
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/wasi-sdk.tar.gz" \
+            https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-34/wasi-sdk-34.0-x86_64-linux.tar.gz
+          echo "$SDK_SHA256  $RUNNER_TEMP/wasi-sdk.tar.gz" | sha256sum --check
+          tar --extract --gzip --file "$RUNNER_TEMP/wasi-sdk.tar.gz" --directory "$RUNNER_TEMP"
+          echo "WASI_SDK_PATH=$RUNNER_TEMP/wasi-sdk-34.0-x86_64-linux" >> "$GITHUB_ENV"
+      - name: Check Python build-cache invalidation
+        if: matrix.tool == 'python'
+        run: python3 -m unittest discover -s external_tools/python -p 'test_build.py'
+      - name: Build the installable WASI archive
+        run: bash "external_tools/$TOOL/package.sh" tar
+      - name: Verify archive contents and metadata
+        run: python3 external_tools/check_archives.py "external_tools/$TOOL/dist/"*.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tool-${{ matrix.tool }}
+          path: external_tools/${{ matrix.tool }}/dist/*.tar
+          if-no-files-found: error
+          retention-days: 14
+
+  validate:
+    name: Validate packages with SAT
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sat -> target
+          key: tool-release-host
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: tool-*
+          path: release-assets
+          merge-multiple: true
+      - name: Build SAT from this release's sources
+        run: cargo build --locked --manifest-path sat/Cargo.toml
+      - name: Check archives, register tools, and validate their entrypoints
+        run: python3 external_tools/check_archives.py --complete --sat sat/target/debug/sat release-assets/*.tar
+      - name: Check host capability boundaries and process exit handling
+        run: cargo test --locked --manifest-path sat/Cargo.toml
+      - name: Check code, jaq, and ripgrep execution and filesystem boundaries
+        run: |
+          mkdir -p external_tools/code/dist external_tools/jaq/dist external_tools/ripgrep/dist
+          cp release-assets/code.tar external_tools/code/dist/code.tar
+          cp release-assets/jaq.tar external_tools/jaq/dist/jaq.tar
+          cp release-assets/ripgrep.tar external_tools/ripgrep/dist/ripgrep.tar
+          cargo build --locked --release --manifest-path external_tools/jaq/Cargo.toml --bin jaq-native
+          python3 external_tools/test_imported_tools.py --skip-build
+          python3 external_tools/code/test_selectors.py --sat sat/target/debug/sat
+      - name: Check original MarkItDown PDF and CLI tests
+        run: |
+          git init "$RUNNER_TEMP/markitdown-upstream"
+          git -C "$RUNNER_TEMP/markitdown-upstream" remote add origin https://github.com/microsoft/markitdown.git
+          git -C "$RUNNER_TEMP/markitdown-upstream" fetch --depth 1 origin ed178952a6672abdfd35b5f9e76a80b6cefc086e
+          git -C "$RUNNER_TEMP/markitdown-upstream" checkout --detach FETCH_HEAD
+          python3 -m venv "$RUNNER_TEMP/markitdown-native"
+          "$RUNNER_TEMP/markitdown-native/bin/python" -m pip install \
+            "$RUNNER_TEMP/markitdown-upstream/packages/markitdown[pdf]" pytest==9.2.0 \
+            pdfminer.six==20260107 pdfplumber==0.11.10 charset-normalizer==3.5.2
+          export SAT_HOME="$RUNNER_TEMP/markitdown-registry"
+          printf '[]\n[]\n[]\n[]\n[]\nunset\n' | sat/target/debug/sat register release-assets/markitdown.tar
+          "$RUNNER_TEMP/markitdown-native/bin/python" external_tools/markitdown/test_upstream.py \
+            --upstream "$RUNNER_TEMP/markitdown-upstream" \
+            --python "$RUNNER_TEMP/markitdown-native/bin/python" \
+            --sat "$PWD/sat/target/debug/sat" --output "$RUNNER_TEMP/markitdown-results"
+          "$RUNNER_TEMP/markitdown-native/bin/python" external_tools/markitdown/test_cli.py \
+            --python "$RUNNER_TEMP/markitdown-native/bin/python" --sat "$PWD/sat/target/debug/sat"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: markitdown-upstream-results
+          path: ${{ runner.temp }}/markitdown-results/
+          if-no-files-found: warn
+      - name: Check Python execution and sandbox boundaries
+        run: |
+          mkdir -p external_tools/python/dist
+          cp release-assets/python.tar external_tools/python/dist/python.tar
+          python3 external_tools/python/test.py --skip-build --sat sat/target/debug/sat
+          python3 external_tools/python/test_http.py --sat sat/target/debug/sat
+
+  build-sat:
+    name: SAT host (${{ matrix.target }})
+    needs: [versions, build]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.versions.outputs.hosts) }}
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      HOST_TARGET: ${{ matrix.target }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Install the repository Rust toolchain
+        run: |
+          rustup show active-toolchain
+          rustup target add "$HOST_TARGET"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sat -> target
+          key: release-host-${{ matrix.target }}
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Check installer scripts
+        run: python3 scripts/test_installers.py
+      - name: Build native SAT executable
+        run: cargo build --locked --release --manifest-path sat/Cargo.toml --target "$HOST_TARGET"
+      - name: Test native host capability boundaries
+        run: cargo test --locked --release --manifest-path sat/Cargo.toml --target "$HOST_TARGET"
+      - name: Package the native executable
+        run: |
+          executable="sat"
+          if [[ "$HOST_TARGET" == *windows* ]]; then executable="sat.exe"; fi
+          python3 scripts/host_release.py pack --target "$HOST_TARGET" --binary "sat/target/$HOST_TARGET/release/$executable"
+      - uses: actions/download-artifact@v8
+        with:
+          name: tool-jaq
+          path: smoke-tools
+      - name: Test the packaged host with the portable jaq component
+        run: python3 scripts/host_release.py smoke dist/host/sat-* --target "$HOST_TARGET" --tool-archive smoke-tools/jaq.tar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: host-${{ matrix.target }}
+          path: dist/host/*
+          if-no-files-found: error
+          retention-days: 14
+
+
+  assemble:
+    name: Assemble and verify release downloads
+    needs: [validate, build-sat]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: tool-*
+          path: release-assets
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: host-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify every expected host and tool archive
+        run: |
+          python3 external_tools/check_archives.py --complete release-assets/*.tar
+          python3 scripts/host_release.py verify release-assets
+      - name: Include installers in the release bundle
+        run: cp install.sh install.ps1 release-assets/
+      - name: Generate and verify checksums
+        working-directory: release-assets
+        run: |
+          sha256sum *.tar *.tar.gz *.zip install.sh install.ps1 > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sat-release
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish SAT and tool archives
+    needs: assemble
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v8
+        with:
+          name: sat-release
+          path: release-assets
+      - name: Verify assembled release checksums
+        working-directory: release-assets
+        run: sha256sum --check SHA256SUMS
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=(release-assets/*.tar release-assets/*.tar.gz release-assets/*.zip release-assets/install.sh release-assets/install.ps1 release-assets/SHA256SUMS)
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            # Reruns can finish an interrupted upload without creating another release.
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            if [[ "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" == true ]]; then
+              gh release edit "$RELEASE_TAG" --draft=false
+            fi
+          else
+            options=(--verify-tag --generate-notes --title "$RELEASE_TAG")
+            if [[ "${RELEASE_TAG%%+*}" == *-* ]]; then
+              options+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" "${assets[@]}" "${options[@]}"
+          fi

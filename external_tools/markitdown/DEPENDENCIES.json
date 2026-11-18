@@ -1,0 +1,189 @@
+{
+  "scope": "Native reference MarkItDown[pdf] base and PDF dependencies; excludes other extras, plugins and build/test tools.",
+  "environment": "CPython 3.12 Linux reference environment, inspected 2026-11-14",
+  "packages": {
+    "beautifulsoup4": {
+      "version": "4.15.0",
+      "dependencies": [
+        "soupsieve",
+        "typing-extensions"
+      ],
+      "native_artifacts": false
+    },
+    "certifi": {
+      "version": "2026.10.23",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "cffi": {
+      "version": "2.1.1",
+      "dependencies": [
+        "pycparser"
+      ],
+      "native_artifacts": true
+    },
+    "charset-normalizer": {
+      "version": "3.5.2",
+      "dependencies": [],
+      "native_artifacts": true
+    },
+    "click": {
+      "version": "8.5.1",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "cryptography": {
+      "version": "50.0.2",
+      "dependencies": [
+        "cffi"
+      ],
+      "native_artifacts": true
+    },
+    "defusedxml": {
+      "version": "0.7.1",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "flatbuffers": {
+      "version": "25.12.19",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "idna": {
+      "version": "3.20",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "magika": {
+      "version": "1.0.3",
+      "dependencies": [
+        "click",
+        "onnxruntime"
+      ],
+      "native_artifacts": false
+    },
+    "markdownify": {
+      "version": "1.2.3",
+      "dependencies": [
+        "beautifulsoup4",
+        "six"
+      ],
+      "native_artifacts": false
+    },
+    "markitdown": {
+      "version": "0.1.9",
+      "dependencies": [
+        "beautifulsoup4",
+        "certifi",
+        "charset-normalizer",
+        "defusedxml",
+        "magika",
+        "markdownify",
+        "pdfminer-six",
+        "pdfplumber",
+        "requests"
+      ],
+      "native_artifacts": false
+    },
+    "numpy": {
+      "version": "2.5.4",
+      "dependencies": [],
+      "native_artifacts": true
+    },
+    "onnxruntime": {
+      "version": "1.32.0",
+      "dependencies": [
+        "flatbuffers",
+        "numpy",
+        "packaging",
+        "protobuf"
+      ],
+      "native_artifacts": true
+    },
+    "packaging": {
+      "version": "26.3",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "pdfminer-six": {
+      "version": "20260107",
+      "dependencies": [
+        "charset-normalizer",
+        "cryptography"
+      ],
+      "native_artifacts": false
+    },
+    "pdfplumber": {
+      "version": "0.11.10",
+      "dependencies": [
+        "pdfminer-six",
+        "pillow",
+        "pypdfium2"
+      ],
+      "native_artifacts": false
+    },
+    "pillow": {
+      "version": "13.0.0",
+      "dependencies": [],
+      "native_artifacts": true
+    },
+    "protobuf": {
+      "version": "7.36.2",
+      "dependencies": [],
+      "native_artifacts": true
+    },
+    "pycparser": {
+      "version": "3.12",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "pypdfium2": {
+      "version": "5.15.2",
+      "dependencies": [],
+      "native_artifacts": true
+    },
+    "requests": {
+      "version": "2.34.2",
+      "dependencies": [
+        "certifi",
+        "charset-normalizer",
+        "idna",
+        "urllib3"
+      ],
+      "native_artifacts": false
+    },
+    "six": {
+      "version": "1.17.0",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "soupsieve": {
+      "version": "4.1",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "typing-extensions": {
+      "version": "4.16.0",
+      "dependencies": [],
+      "native_artifacts": false
+    },
+    "urllib3": {
+      "version": "2.8.0",
+      "dependencies": [],
+      "native_artifacts": false
+    }
+  },
+  "wasi_runtime_packages": [
+    "markitdown (PDF-only orchestration)",
+    "pdfplumber==0.11.10",
+    "pdfminer.six==20260107",
+    "charset-normalizer==3.5.2 (pure Python fallback)"
+  ],
+  "wasi_exclusions": [
+    "Encryption: cryptography/cffi/pycparser omitted; encrypted PDFs rejected.",
+    "Rendering: Pillow/pypdfium2 omitted; image rendering APIs unavailable.",
+    "Automatic ML type detection: magika/onnxruntime tree omitted; PDF-only dispatch.",
+    "HTML/network conversion: base HTML and requests trees omitted.",
+    "Ghostscript repair and remote/cloud/plugin features unavailable."
+  ]
+}

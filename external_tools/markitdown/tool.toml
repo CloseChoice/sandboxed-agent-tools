@@ -1,0 +1,11 @@
+name = "markitdown"
+version = "0.1.9"
+description = "MarkItDown 0.1.9 CLI with the upstream PDF converter in WASI. Local PDF profile."
+entrypoint = "run"
+command_output = true
+cli_passthrough = true
+fuel = 1000000000
+
+[[arguments]]
+name = "args"
+help = "Unmodified upstream CLI arguments; host permissions follow a separate --."

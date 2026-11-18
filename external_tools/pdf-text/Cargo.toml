@@ -1,0 +1,18 @@
+[package]
+name = "sat-pdf-text-guest"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Page-labelled text extraction from explicitly granted PDFs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "=0.57.1"
+lopdf = { version = "=0.46.0", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace]

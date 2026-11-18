@@ -1,0 +1,238 @@
+{
+  "tesseract": "5.5.4",
+  "leptonica": "1.87.0",
+  "model": "tessdata_fast eng",
+  "scope": "Our image-profile integration suite with original upstream fixture/ground truth; not upstream full test suite.",
+  "passed": 37,
+  "tests": [
+    {
+      "name": "upstream-native-ground-truth",
+      "status": "passed",
+      "kind": "upstream fixture"
+    },
+    {
+      "name": "phototest.png/txt",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.png/tsv",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.png/hocr",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.jpg/txt",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.jpg/tsv",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.jpg/hocr",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.pgm/txt",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.pgm/tsv",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.pgm/hocr",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.bmp/txt",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.bmp/tsv",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest.bmp/hocr",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest-alpha.png/txt",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest-alpha.png/tsv",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "phototest-alpha.png/hocr",
+      "status": "passed",
+      "kind": "native/WASI",
+      "exact_bytes": true
+    },
+    {
+      "name": "stdin-no-filesystem-grants",
+      "status": "passed",
+      "kind": "boundary/profile"
+    },
+    {
+      "name": "relative-input",
+      "status": "passed",
+      "kind": "boundary/profile"
+    },
+    {
+      "name": "explicit-model-with-read-grant",
+      "status": "passed",
+      "kind": "boundary/profile"
+    },
+    {
+      "name": "blank-page",
+      "status": "passed",
+      "kind": "boundary/profile"
+    },
+    {
+      "name": "no-read-grant",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "unrelated-read-grant",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "invalid-image",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "pixel-limit",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "dimension-limit",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "encoded-input-limit",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "unsupported-language",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "missing-model-grant",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "invalid-model",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "external-model-limit",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "unsupported-osd",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "unsupported-legacy-engine",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 2
+    },
+    {
+      "name": "external-config-rejected",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 2
+    },
+    {
+      "name": "output-write-denied",
+      "status": "passed",
+      "kind": "boundary/profile",
+      "exit": 1
+    },
+    {
+      "name": "exact-output-file-grant",
+      "status": "passed",
+      "kind": "boundary/profile"
+    },
+    {
+      "name": "new-output-with-directory-grant",
+      "status": "passed",
+      "kind": "boundary/profile"
+    },
+    {
+      "name": "no-unrequested-output-files",
+      "status": "passed",
+      "kind": "boundary/profile"
+    }
+  ],
+  "timing": {
+    "native_ms": [
+      141.00410602986813,
+      138.6799180181697,
+      139.03126993682235
+    ],
+    "sat_wasi_ms": [
+      633.4894449682906,
+      636.4074519369751,
+      642.2811360098422
+    ],
+    "median_native_ms": 139.03126993682235,
+    "median_sat_wasi_ms": 636.4074519369751
+  },
+  "timing_notes": "Three warm-registry CLI calls per backend; includes startup/logging overhead. Native and WASI use matching OCR source/model; floating-point/SIMD implementations can differ."
+}

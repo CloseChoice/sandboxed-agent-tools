@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/microsoft/markitdown",
+  "commit": "ed178952a6672abdfd35b5f9e76a80b6cefc086e",
+  "files": {
+    "__main__.py": "85923a27743e782db93fbb9bee38123056989f4a8d0178deececd4f3fdea4c28",
+    "__about__.py": "6afb8a8698cd230632d46b3e1af6c8df416d32896f1bfb799ef5ae9d657a23fd",
+    "_base_converter.py": "3b9cfbe86bc2af4f7f23042e60eaccf5e8d9df866d8a35a77d00672eab5202e6",
+    "_stream_info.py": "7efe98dae5afb2ba87947103139291804c71dfd8d80d53c134dda6bd2f3503ba",
+    "_exceptions.py": "5e927ec2e2aaf7eeee1bbfa845fff82763a5892ccd8c6e2046b12af9eae1e206",
+    "converters/_pdf_converter.py": "8a48783a111f8c240ab87320921455e879a5f6753421a6cc472e6d2b89bf2c92"
+  }
+}

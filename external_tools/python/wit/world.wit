@@ -1,0 +1,6 @@
+package sat:python@0.1.0;
+
+world python-tool {
+    import wasi:http/outgoing-handler@0.2.12;
+    export run: func(code: option<string>, script: option<string>) -> result<string, string>;
+}

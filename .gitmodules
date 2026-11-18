@@ -1,0 +1,3 @@
+[submodule "tesseract-upstream"]
+	path = external_tools/tesseract/upstream/tesseract
+	url = https://github.com/tesseract-ocr/tesseract.git

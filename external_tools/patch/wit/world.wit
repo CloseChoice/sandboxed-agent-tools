@@ -1,0 +1,4 @@
+package sat:patch@0.1.0;
+world patch-cli {
+    export run: func(args: list<string>) -> s32;
+}

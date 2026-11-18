@@ -1,0 +1,54 @@
+name = "code"
+version = "0.2.0"
+description = "Tree-sitter code retrieval: search text and return enclosing functions, outline declarations, read symbols or enclosing definitions. Python, Rust, JavaScript, TypeScript/TSX."
+entrypoint = "run"
+fuel = 1000000000
+
+[[arguments]]
+name = "operation"
+help = "search, outline, read-symbol, or read-enclosing."
+
+[[arguments]]
+name = "query"
+help = "Search text/regex, or exact symbol name for read-symbol. Omit for outline and read-enclosing."
+
+[options.path]
+help = "File/directory, glob, or regex:ROOT::EXPR selector. Repeat --path for each selector: --path /src --path /tests. Quote patterns. Grant roots after --."
+
+[options.exclude]
+help = "Repeatable exclusion: glob (default) or regex:EXPR. Matches root-relative or full paths; exclusions win. Slash-free globs also match basenames."
+
+[options.mode]
+default = "text"
+help = "Search mode: text (literal, case-sensitive) or regex."
+
+[options.context]
+default = "function"
+help = "Selection: function (smallest callable), outer-function (outermost callable), or class (class/struct/enum/trait/impl)."
+
+[options.position]
+help = "Zero-based UTF-8 byte offset for read-enclosing; requires exactly one file path."
+
+[options.include-docs]
+default = true
+help = "Include attached documentation in full/signature-docs extraction (true/false). Signature-only always omits docs."
+
+[options.extract]
+default = "full"
+help = "Extraction: full source, signature, or signature-docs (signature plus attached docs and Python docstring). Outline defaults to signatures without source."
+
+[options.include-parent-signature]
+default = true
+help = "Return the owning class/impl signature separately (true/false)."
+
+[options.max-results]
+default = 20
+help = "Maximum definitions returned (1..1000). Small values provide previews."
+
+[options.max-bytes]
+default = 65536
+help = "Maximum bytes of extracted source per result (1..1048576). Oversized extractions return a size-limit status without partial source."
+
+[options.format]
+default = "text"
+help = "text (readable definitions) or json (source, byte/line ranges, hits, hash, parse status)."

@@ -1,0 +1,43 @@
+name = "ripgrep"
+version = "0.1.0"
+description = "Search file contents recursively with ripgrep regex, literal text, and gitignore filtering. Returns readable excerpts or JSON."
+entrypoint = "run"
+fuel = 1000000000
+
+[[arguments]]
+name = "pattern"
+help = "Regex pattern (or literal text with --fixed-strings true)."
+
+[options.path]
+help = "File or directory to search. Repeat --path for each root: --path /src --path /tests. Use absolute paths and grant read access after --."
+
+[options.format]
+default = "text"
+help = "Output format: text (grouped headings and numbered lines) or json (structured results)."
+
+[options.ignore-case]
+short = "i"
+default = false
+help = "Case-insensitive matching (true/false)."
+
+[options.fixed-strings]
+short = "F"
+default = false
+help = "Treat the pattern as literal text (true/false)."
+
+[options.hidden]
+default = false
+help = "Include hidden entries (true/false)."
+
+[options.no-ignore]
+default = false
+help = "Disable .ignore and .gitignore filtering (true/false)."
+
+[options.context]
+short = "C"
+default = 0
+help = "Lines before and after matches (0 to 100)."
+
+[options.max-results]
+default = 100
+help = "Maximum returned lines, including context (1 to 10000). Use a small value for previews."

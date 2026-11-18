@@ -1,0 +1,4 @@
+package sat:jaq@3.1.2;
+world jaq {
+    export run: func(args: list<string>) -> s32;
+}

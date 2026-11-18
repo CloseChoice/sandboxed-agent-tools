@@ -1,0 +1,18 @@
+[package]
+name = "sat-ffmpeg-guest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "LGPL-2.1-or-later"
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+probe = []
+
+[dependencies]
+wit-bindgen = "=0.57.1"
+
+[workspace]

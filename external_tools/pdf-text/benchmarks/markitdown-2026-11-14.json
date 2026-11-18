@@ -1,0 +1,1066 @@
+{
+  "created_utc": "2026-11-14T13:26:07.313346+00:00",
+  "upstream": {
+    "url": "https://github.com/microsoft/markitdown",
+    "commit": "ed178952a6672abdfd35b5f9e76a80b6cefc086e",
+    "test_sha256": "67694f29cb74866df2ee1b7fd04d9581551529edc4740da5fe84716d3cb4468a"
+  },
+  "selection": {
+    "criterion": "GitHub stars among reviewed PDF-capable CLI projects",
+    "checked_date": "2026-11-14",
+    "github_displayed_stars": {
+      "microsoft/markitdown": "195.3k",
+      "opendatalab/MinerU": "83,642",
+      "docling-project/docling": "70.6k",
+      "datalab-to/marker": "40.9k",
+      "pymupdf/PyMuPDF": "11.1k",
+      "pdfcpu/pdfcpu": "8.9k"
+    }
+  },
+  "environment": {
+    "platform": "Linux-7.0.0-42-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+    "runs": 3
+  },
+  "methodology": [
+    "Different engines: native MarkItDown/pdfminer/pdfplumber vs SAT WASI lopdf; not a WASI overhead measurement.",
+    "SAT is registered/compiled before timing; registration time is separate.",
+    "Timing includes full CLI process startup. SAT timings also include the required Python logging wrapper.",
+    "One untimed warmup per backend/file, followed by repeated sequential invocations; OS caches are not cleared.",
+    "No upstream assertions are changed. The SAT adapter only joins JSON page text, rejecting truncated output.",
+    "MarkItDown internal implementation tests and remote conversions are explicitly skipped for SAT.",
+    "Plain-text extraction is not Markdown CLI compatibility; successful execution alone is not conformance."
+  ],
+  "suites": {
+    "native": {
+      "exit_code": 0,
+      "tests": {
+        "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_extraction": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.06168679299298674,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_no_duplication": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05669987003784627,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_correct_position": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05608129594475031,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_receipt_pdf_extraction": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.08043152093887329,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_multipage_invoice_extraction": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.10767733305692673,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_academic_pdf_extraction": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.19420767901465297,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_movie_theater_booking_pdf_extraction": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.06944294599816203,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_movie_theater_full_output": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.07018129504285753,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_sparse_borderless_table_full_output": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.06776817399077117,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_repair_multipage_full_output": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.12473390600644052,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_receipt_full_output": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.088944107061252,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_academic_paper_full_output": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.19257780199404806,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_medical_scan_full_output": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.008963925065472722,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableMarkdownFormat::test_markdown_table_has_pipe_format": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.07513554603792727,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableMarkdownFormat::test_markdown_table_columns_have_pipes": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.06438770494423807,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_borderless_table_structure": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05797276506200433,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_multipage_invoice_table_structure": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.11681062809657305,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_receipt_has_no_tables": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.07959603797644377,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[SPARSE-2024-INV-1234_borderless_table.pdf-2]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05739362596068531,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[REPAIR-2022-INV-001_multipage.pdf-6]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.09827403200324625,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[RECEIPT-2024-TXN-98765_retail_purchase.pdf-0]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.08019481494557112,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[test.pdf-0]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.20326567208394408,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_borderless_table_data_integrity": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05771508999168873,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_partial_numbering_pattern_regex": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 6.621400825679302e-05,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_masterformat_partial_numbering_not_split": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.0338687039911747,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_masterformat_content_preserved": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.034178767004050314,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[one-blank-line]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 7.017306052148342e-05,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[multiple-blank-lines]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 7.630407344549894e-05,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[whitespace-only-lines]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 6.437103729695082e-05,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_multiple_partial_numberings_all_merged": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.03667045501060784,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_page_close_called_on_every_page": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.1515299219172448,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_plain_text_pdf_falls_back_to_pdfminer": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.578050676966086,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_plain_text_pdf_still_closes_all_pages": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.5614743490004912,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_mixed_pdf_uses_form_extraction_per_page": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.2483131899498403,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_only_one_pdfplumber_open_call": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.15225633908994496,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_real_pdf_page_cleanup": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.1073654880747199,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::test_markitdown_remote": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 7.013196591287851e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1373, 'Skipped: do not run tests that query external urls')",
+          "detail_abbreviated": false
+        }
+      },
+      "counts": {
+        "passed": 36,
+        "skipped": 1
+      }
+    },
+    "sat": {
+      "exit_code": 1,
+      "tests": {
+        "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_extraction": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.06000643200241029,
+          "detail": "tests/test_pdf.py:143: in test_borderless_table_extraction\n    assert \"|\" in text_content, \"Should have pipe separators for form-style data\"\nE   AssertionError: Should have pipe separators for form-style data\nE   assert '|' in '\\nINVENTORY RECONCILIATION REPORT\\nReport ID: SPARSE-2024-INV-1234\\nWarehouse: Distribution Center East\\nReport Date:...rification for critical\\nitems. 3. Schedule follow-up audit for high-value products (SKU-6678, SKU-2234).\\nApproval:\\n'",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_no_duplication": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.059808859950862825,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_borderless_table_correct_position": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.059142826939933,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_receipt_pdf_extraction": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05933232302777469,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_multipage_invoice_extraction": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.06188557797577232,
+          "detail": "tests/test_pdf.py:532: in test_multipage_invoice_extraction\n    assert \"|\" in text_content, \"Form-style PDF should contain pipe separators\"\nE   AssertionError: Form-style PDF should contain pipe separators\nE   assert '|' in 'Insured name \\nGabriel Diaz \\nYear \\n2022 \\nClaim # \\nSF-1008 \\nMake \\nJeep \\nPolicy # \\nPOL-2022-555 \\nModel \\nGrand...he mechanical concern is  \\ndeemed not related to an insurance claim, vehicle owner will be reponsible for charges. \\n'",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_academic_pdf_extraction": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.060467829927802086,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableExtraction::test_movie_theater_booking_pdf_extraction": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.0594134769635275,
+          "detail": "tests/test_pdf.py:647: in test_movie_theater_booking_pdf_extraction\n    assert \"|\" in text_content, \"Booking order should contain pipe separators\"\nE   AssertionError: Booking order should contain pipe separators\nE   assert '|' in '\\n\\nBOOKING ORDER\\n\\nPrint Date 12/15/2024 14:30:22\\nPage 1 of 1\\n\\nSTARLIGHT CINEMAS\\n\\nOrders\\n\\nOrder / Rev:\\n2024...ng order is subject to cinema availability and standard terms.\\nAll showtimes are approximate and subject to change.\\n'",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_movie_theater_full_output": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.058294710936024785,
+          "detail": "tests/test_pdf.py:727: in test_movie_theater_full_output\n    assert actual_output == expected_output\nE   AssertionError: assert '\\n\\nBOOKING ... to change.\\n' == 'BOOKING ORDE... ---------- |'\nE     \nE     + \nE     + \nE       BOOKING ORDER\nE     + \nE       Print Date 12/15/2024 14:30:22\nE       Page 1 of 1...\nE     \nE     ...Full output truncated, use '-vv' to show",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_sparse_borderless_table_full_output": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.05922473093960434,
+          "detail": "tests/test_pdf.py:752: in test_sparse_borderless_table_full_output\n    assert actual_output == expected_output\nE   AssertionError: assert '\\nINVENTORY ...\\nApproval:\\n' == 'INVENTORY RE...).\\nApproval:'\nE     \nE     + \nE       INVENTORY RECONCILIATION REPORT\nE       Report ID: SPARSE-2024-INV-1234\nE       Warehouse: Distribution Center East\nE       Report Date: 2024-11-15\nE       Prepared By: Sarah Martinez...\nE     \nE     ...Full output truncated, use '-vv' to show",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_repair_multipage_full_output": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.062469867058098316,
+          "detail": "tests/test_pdf.py:773: in test_repair_multipage_full_output\n    assert actual_output == expected_output\nE   AssertionError: assert 'Insured name...r charges. \\n' == 'ZAVA AUTO RE... for charges.'\nE     \nE     - ZAVA AUTO REPAIR\nE     - Certified Collision Repair\nE     - 123 Main Street, Redmond, WA 98052\nE     - Phone: (425) 000-0000\nE     - Preliminary Estimate (ID: EST-1008)\nE     - | Customer Information |                     |     | Vehicle Information |                   |...\nE     \nE     ...Full output truncated, use '-vv' to show",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_receipt_full_output": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.0584647610085085,
+          "detail": "tests/test_pdf.py:798: in test_receipt_full_output\n    assert actual_output == expected_output\nE   AssertionError: assert '\\nTECHMART E...===========\\n' == 'TECHMART ELE...=========\\n\\n'\nE     \nE     + \nE       TECHMART ELECTRONICS\nE       4567 Innovation Blvd\nE       San Francisco, CA 94103\nE       (415) 555-0199\nE     - ...\nE     \nE     ...Full output truncated, use '-vv' to show",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_academic_paper_full_output": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.06085594999603927,
+          "detail": "tests/test_pdf.py:817: in test_academic_paper_full_output\n    assert actual_output == expected_output\nE   AssertionError: assert '1 Introducti...cussion. 2 \\n' == '1\\n\\nIntrodu...ion.\\n\\n2\\n\\n'\nE     \nE     + 1 Introduction Large language models (LLMs) are becoming a crucial building block in developing powerful agents that utilize LLMs for reasoning, tool usage, and adapting to new observations (Yao et al., 2022; Xi et al., 2023; Wang et al., 2023b) in many real-world tasks. Given the expanding tasks that could bene\ufb01t from LLMs and the growing task complexity, an intuitive approach to scale up the power of agents is to use multiple agents that cooperate. Prior work suggests that multiple agents can help encourage divergent thinking (Liang et al., 2023), improve factuality...\nE     \nE     ...Full output truncated, use '-vv' to show",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfFullOutputComparison::test_medical_scan_full_output": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.058728557894937694,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableMarkdownFormat::test_markdown_table_has_pipe_format": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.059142837068066,
+          "detail": "tests/test_pdf.py:878: in test_markdown_table_has_pipe_format\n    assert len(pipe_rows) > 0, \"Should have pipe-separated rows\"\nE   AssertionError: Should have pipe-separated rows\nE   assert 0 > 0\nE    +  where 0 = len([])",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableMarkdownFormat::test_markdown_table_columns_have_pipes": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.0586856760783121,
+          "detail": "tests/test_pdf.py:902: in test_markdown_table_columns_have_pipes\n    assert len(table_rows) > 0, \"Should have markdown table rows\"\nE   AssertionError: Should have markdown table rows\nE   assert 0 > 0\nE    +  where 0 = len([])",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_borderless_table_structure": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.05999050196260214,
+          "detail": "tests/test_pdf.py:932: in test_borderless_table_structure\n    assert \"|\" in text_content, \"Borderless table PDF should have pipe separators\"\nE   AssertionError: Borderless table PDF should have pipe separators\nE   assert '|' in '\\nINVENTORY RECONCILIATION REPORT\\nReport ID: SPARSE-2024-INV-1234\\nWarehouse: Distribution Center East\\nReport Date:...rification for critical\\nitems. 3. Schedule follow-up audit for high-value products (SKU-6678, SKU-2234).\\nApproval:\\n'",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_multipage_invoice_table_structure": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.05925780290272087,
+          "detail": "tests/test_pdf.py:950: in test_multipage_invoice_table_structure\n    assert \"|\" in text_content, \"Invoice PDF should have pipe separators\"\nE   AssertionError: Invoice PDF should have pipe separators\nE   assert '|' in 'Insured name \\nGabriel Diaz \\nYear \\n2022 \\nClaim # \\nSF-1008 \\nMake \\nJeep \\nPolicy # \\nPOL-2022-555 \\nModel \\nGrand...he mechanical concern is  \\ndeemed not related to an insurance claim, vehicle owner will be reponsible for charges. \\n'",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_receipt_has_no_tables": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05761806794907898,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[SPARSE-2024-INV-1234_borderless_table.pdf-2]": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.060357012087479234,
+          "detail": "tests/test_pdf.py:1009: in test_all_pdfs_table_rows_consistent\n    assert (\nE   AssertionError: SPARSE-2024-INV-1234_borderless_table.pdf: Expected 2 tables, found 0\nE   assert 0 == 2\nE    +  where 0 = len([])",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[REPAIR-2022-INV-001_multipage.pdf-6]": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.061011433019302785,
+          "detail": "tests/test_pdf.py:1009: in test_all_pdfs_table_rows_consistent\n    assert (\nE   AssertionError: REPAIR-2022-INV-001_multipage.pdf: Expected 6 tables, found 0\nE   assert 0 == 6\nE    +  where 0 = len([])",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[RECEIPT-2024-TXN-98765_retail_purchase.pdf-0]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05934341507963836,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_all_pdfs_table_rows_consistent[test.pdf-0]": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05948585201986134,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfTableStructureConsistency::test_borderless_table_data_integrity": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.06070110900327563,
+          "detail": "tests/test_pdf.py:1031: in test_borderless_table_data_integrity\n    assert len(tables) >= 2, \"Should have at least 2 tables\"\nE   AssertionError: Should have at least 2 tables\nE   assert 0 >= 2\nE    +  where 0 = len([])",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_partial_numbering_pattern_regex": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 5.82690117880702e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1052, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_masterformat_partial_numbering_not_split": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.05893878196366131,
+          "detail": "tests/test_pdf.py:1096: in test_masterformat_partial_numbering_not_split\n    assert len(isolated_numberings) == 0, (\nE   AssertionError: Partial numberings should not be isolated from their text. Found isolated: ['.1', '.2']\nE   assert 2 == 0\nE    +  where 2 = len(['.1', '.2'])",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_masterformat_content_preserved": {
+          "outcome": "passed",
+          "phase": "call",
+          "seconds": 0.05782095005270094,
+          "detail": "",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[one-blank-line]": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 5.8390083722770214e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1150, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[multiple-blank-lines]": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 4.660699050873518e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1150, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_merge_partial_numbering_with_empty_lines_between[whitespace-only-lines]": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 4.599709063768387e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1150, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestMasterFormatPartialNumbering::test_multiple_partial_numberings_all_merged": {
+          "outcome": "failed",
+          "phase": "call",
+          "seconds": 0.05931567202787846,
+          "detail": "tests/test_pdf.py:1193: in test_multiple_partial_numberings_all_merged\n    assert (\nE   AssertionError: Found 2 isolated partial numberings that weren't merged\nE   assert 2 == 0",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_page_close_called_on_every_page": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 5.2438932470977306e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1259, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_plain_text_pdf_falls_back_to_pdfminer": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 4.6397093683481216e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1269, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_plain_text_pdf_still_closes_all_pages": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 4.438299220055342e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1279, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_mixed_pdf_uses_form_extraction_per_page": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 4.379195161163807e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1289, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_only_one_pdfplumber_open_call": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 5.2799005061388016e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1299, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::TestPdfMemoryOptimization::test_real_pdf_page_cleanup": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 4.7528999857604504e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1303, 'Skipped: MarkItDown internal unit/lifecycle or remote test; no equivalent local SAT conversion API')",
+          "detail_abbreviated": false
+        },
+        "tests/test_pdf.py::test_markitdown_remote": {
+          "outcome": "skipped",
+          "phase": "setup",
+          "seconds": 4.319101572036743e-05,
+          "detail": "('/home/tobias/programming/github/sandboxed-agent-tools/experiments/.build/pdf-text-benchmark/markitdown/packages/markitdown/tests/test_pdf.py', 1373, 'Skipped: do not run tests that query external urls')",
+          "detail_abbreviated": false
+        }
+      },
+      "counts": {
+        "failed": 17,
+        "passed": 9,
+        "skipped": 11
+      }
+    }
+  },
+  "files": [
+    {
+      "file": "MEDRPT-2024-PAT-3847_medical_report_scan.pdf",
+      "sha256": "4a8081920ba09337c436df8ad3da8ea6473b64176bf9191e568bc95815b723e6",
+      "bytes": 282554,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          363.36406401824206,
+          350.2161259530112,
+          349.6139340568334
+        ],
+        "median_ms": 350.2161259530112,
+        "truncated": false,
+        "text_bytes": 1,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          59.147116960957646,
+          57.948400964960456,
+          58.098603039979935
+        ],
+        "median_ms": 58.098603039979935,
+        "truncated": false,
+        "text_bytes": 0,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "RECEIPT-2024-TXN-98765_retail_purchase.pdf",
+      "sha256": "23b00e2e069e038d54e4c23b3868569393d2874823201e3c0b7a363ffd233fc6",
+      "bytes": 8459,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          427.5984540581703,
+          426.36438203044236,
+          440.8035899978131
+        ],
+        "median_ms": 427.5984540581703,
+        "truncated": false,
+        "text_bytes": 1484,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          59.90073399152607,
+          57.625463930889964,
+          58.193181990645826
+        ],
+        "median_ms": 58.193181990645826,
+        "truncated": false,
+        "text_bytes": 1470,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "REPAIR-2022-INV-001_multipage.pdf",
+      "sha256": "83614c95e5cfe2207eeeba9973977b3bf054eb41bdd14eb753f5b53c1588c2fe",
+      "bytes": 176629,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          450.4849469522014,
+          466.446588980034,
+          450.6199409952387
+        ],
+        "median_ms": 450.6199409952387,
+        "truncated": false,
+        "text_bytes": 5090,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          60.865660081617534,
+          60.303031001240015,
+          60.1192059693858
+        ],
+        "median_ms": 60.303031001240015,
+        "truncated": false,
+        "text_bytes": 2860,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "SPARSE-2024-INV-1234_borderless_table.pdf",
+      "sha256": "784fef202eb748d5d274eaaf2ded51dfd0d0d1e92225e84fd33dafc2333d15d3",
+      "bytes": 19649,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          401.64816100150347,
+          403.20104197598994,
+          399.59851501043886
+        ],
+        "median_ms": 401.64816100150347,
+        "truncated": false,
+        "text_bytes": 2712,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          59.342975029721856,
+          57.96753789763898,
+          58.170369011349976
+        ],
+        "median_ms": 58.170369011349976,
+        "truncated": false,
+        "text_bytes": 1759,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "masterformat_partial_numbering.pdf",
+      "sha256": "de5bfd981f890d7b8a9544c34633f365449886e430bdfb2ea4ff6f0fad61ca63",
+      "bytes": 2114,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          399.4807340204716,
+          391.9018649030477,
+          372.9286859743297
+        ],
+        "median_ms": 391.9018649030477,
+        "truncated": false,
+        "text_bytes": 528,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          59.66094403993338,
+          57.88215599022806,
+          56.700703920796514
+        ],
+        "median_ms": 57.88215599022806,
+        "truncated": false,
+        "text_bytes": 519,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "movie-theater-booking-2024.pdf",
+      "sha256": "08c34236fcfa228f4caf9c6b0eb4b4f2a9a316938117fe941cae225ef0ee0318",
+      "bytes": 3798,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          415.811853017658,
+          416.6373860789463,
+          437.93861602898687
+        ],
+        "median_ms": 416.6373860789463,
+        "truncated": false,
+        "text_bytes": 4031,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          59.171563014388084,
+          59.88848197739571,
+          60.62133109662682
+        ],
+        "median_ms": 59.88848197739571,
+        "truncated": false,
+        "text_bytes": 2103,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": null
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "pdf_cleanup_form.pdf",
+      "sha256": "f372c0fa9b03bc625a69942c07f6f79901ed1d1ac19111a022e1a60e85e5e2ae",
+      "bytes": 501108,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          516.0269229672849,
+          520.414006896317,
+          516.0917260218412
+        ],
+        "median_ms": 516.0917260218412,
+        "truncated": false,
+        "text_bytes": 7859,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": true
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          64.60602895822376,
+          63.15550999715924,
+          63.885372946970165
+        ],
+        "median_ms": 63.885372946970165,
+        "truncated": false,
+        "text_bytes": 4311,
+        "vector_missing": [
+          "| Customer Information |",
+          "| GRAND TOTAL"
+        ],
+        "vector_forbidden": [],
+        "vector_pass": false
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "pdf_cleanup_mixed.pdf",
+      "sha256": "356de1548e0560e58302b873ba9bacf5024a8be5fe384bc21d670fa4db407ccc",
+      "bytes": 425081,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          594.9752789456397,
+          592.6476699532941,
+          578.3119179541245
+        ],
+        "median_ms": 592.6476699532941,
+        "truncated": false,
+        "text_bytes": 10036,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": true
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          61.807833961211145,
+          62.483576009981334,
+          63.67867405060679
+        ],
+        "median_ms": 62.483576009981334,
+        "truncated": false,
+        "text_bytes": 8087,
+        "vector_missing": [
+          "| Customer Information |",
+          "| GRAND TOTAL"
+        ],
+        "vector_forbidden": [],
+        "vector_pass": false
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "pdf_cleanup_plain.pdf",
+      "sha256": "4a4d81895e5fc428144986a9835e57bf534093508352c96afea264bf826a73c5",
+      "bytes": 273125,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          923.9331419812515,
+          909.5228400547057,
+          909.0137529419735
+        ],
+        "median_ms": 909.5228400547057,
+        "truncated": false,
+        "text_bytes": 15603,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": true
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          63.36145696695894,
+          63.25228197965771,
+          64.85091103240848
+        ],
+        "median_ms": 63.36145696695894,
+        "truncated": false,
+        "text_bytes": 15639,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": true
+      },
+      "exact_text_match": false
+    },
+    {
+      "file": "test.pdf",
+      "sha256": "77c4014cf15ea5e56663e9b8093ddc2a89a9224c15d6a9eb2aa8af2b48e1b237",
+      "bytes": 92971,
+      "native": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          562.4905249569565,
+          562.343648984097,
+          544.818104011938
+        ],
+        "median_ms": 562.343648984097,
+        "truncated": false,
+        "text_bytes": 5201,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": true
+      },
+      "sat": {
+        "exit_code": 0,
+        "measured_exit_codes": [
+          0,
+          0,
+          0
+        ],
+        "milliseconds": [
+          59.3833529856056,
+          59.54902502708137,
+          60.51135598681867
+        ],
+        "median_ms": 59.54902502708137,
+        "truncated": false,
+        "text_bytes": 5213,
+        "vector_missing": [],
+        "vector_forbidden": [],
+        "vector_pass": true
+      },
+      "exact_text_match": false
+    }
+  ],
+  "matched_conversion_tests": {
+    "total": 26,
+    "native_passed": 26,
+    "sat_passed": 9
+  },
+  "sat_archive_sha256": "a23fbb8a3766cfc3fa530a77e8cc2b38cce9d6c97076e2c4ba71637ff38883b3",
+  "registration_ms": 7048.901465954259,
+  "registration_cache_preexisting": false,
+  "timing_summary": {
+    "native_median_of_file_medians_ms": 439.1091975267045,
+    "sat_median_of_file_medians_ms": 59.71875350223854,
+    "warning": "Different engines and output quality; this is not WASI overhead or an equivalent-work speedup."
+  },
+  "native_requirements": [
+    "beautifulsoup4==4.15.0",
+    "certifi==2026.10.23",
+    "cffi==2.1.1",
+    "charset-normalizer==3.5.2",
+    "click==8.5.1",
+    "cryptography==50.0.2",
+    "defusedxml==0.7.1",
+    "flatbuffers==25.12.19",
+    "idna==3.20",
+    "iniconfig==2.3.1",
+    "magika==1.0.3",
+    "markdownify==1.2.3",
+    "markitdown @ git+https://github.com/microsoft/markitdown.git@ed178952a6672abdfd35b5f9e76a80b6cefc086e#subdirectory=packages/markitdown",
+    "numpy==2.5.4",
+    "onnxruntime==1.32.0",
+    "packaging==26.3",
+    "pdfminer.six==20260107",
+    "pdfplumber==0.11.10",
+    "pillow==13.0.0",
+    "pluggy==1.7.0",
+    "protobuf==7.36.2",
+    "pycparser==3.12",
+    "Pygments==2.21.0",
+    "pypdfium2==5.15.2",
+    "pytest==9.2.0",
+    "requests==2.34.2",
+    "six==1.17.0",
+    "soupsieve==4.1",
+    "typing_extensions==4.16.0",
+    "urllib3==2.8.0"
+  ]
+}

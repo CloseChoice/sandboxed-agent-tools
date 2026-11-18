@@ -1,0 +1,33 @@
+package example:brave-search@0.1.0;
+
+interface search {
+    record hit {
+        title: string,
+        url: string,
+        description: string,
+    }
+
+    /// Return search data directly to the caller, without stdout transport.
+    search: func(query: string) -> result<list<hit>, string>;
+}
+
+world brave-search {
+    import wasi:http/outgoing-handler@0.2.12;
+    export search;
+    use search.{hit};
+    export search-web: func(query: string, api-key: string) -> result<list<hit>, string>;
+    /// Demonstration-only security probes used by the offline integration test.
+    export sandbox-probe: func() -> result<_, string>;
+}
+
+// Self-contained root exports for SAT; no standalone search-interface import.
+world sat-brave-search {
+    import wasi:http/outgoing-handler@0.2.12;
+    record hit {
+        title: string,
+        url: string,
+        description: string,
+    }
+    export search-web: func(query: string, api-key: string) -> result<list<hit>, string>;
+    export sandbox-probe: func() -> result<_, string>;
+}

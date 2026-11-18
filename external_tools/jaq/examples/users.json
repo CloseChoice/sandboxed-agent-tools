@@ -1,0 +1,6 @@
+{
+  "users": [
+    {"name": "Ada", "active": true},
+    {"name": "Grace", "active": false}
+  ]
+}

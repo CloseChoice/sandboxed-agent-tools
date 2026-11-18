@@ -1,0 +1,5 @@
+package sat:ffmpeg@0.1.0;
+
+world media-cli {
+    export run: func(args: list<string>) -> s32;
+}
