@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-wasmtime = { version = "=48.0.2", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
-wasmtime-wasi = "=48.0.2"
+wasmtime = { version = "=48.0.7", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+wasmtime-wasi = "=48.0.7"
 serde = { version = "1", features = ["derive"] }
 toml = "0.9"

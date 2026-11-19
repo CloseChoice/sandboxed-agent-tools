@@ -13,7 +13,7 @@ neo_frizbee = { version = "=0.11.0", features = ["safe_read"] }
 wit-bindgen = "0.46"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-wasmtime = { version = "=48.0.2", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
+wasmtime = { version = "=48.0.7", default-features = false, features = ["component-model", "cranelift", "runtime", "std"] }
 
 [patch.crates-io]
 neo_frizbee = { path = "vendor/neo_frizbee" }
