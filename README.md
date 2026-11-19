@@ -61,7 +61,7 @@ SHA-256 checksums.
 To install SAT and all five default tools from the published prerelease:
 
 ```sh
-curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0-rc.1/install.sh | bash -s -- --version v0.1.0-rc.1 default-tools
+curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.sh | bash -s -- --version v0.1.0 default-tools
 ```
 
 Replace `default-tools` with a comma-separated list such as `python,jaq`, or
