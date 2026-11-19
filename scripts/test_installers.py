@@ -16,9 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PWSH = os.environ.get("SAT_TEST_PWSH") or shutil.which("pwsh")
 VERSION = "0.1.0-rc.1"
 REPO = "https://github.com/CloseChoice/sandboxed-agent-tools"
-PLATFORMS = {"linux-x64": "x86_64-unknown-linux-gnu",
-             "macos-x64": "x86_64-apple-darwin",
-             "macos-arm64": "aarch64-apple-darwin"}
+PLATFORMS = {"linux-x64": "x86_64-unknown-linux-gnu"}
 
 
 @unittest.skipIf(os.name == "nt", "Fixtures use a Unix executable stub; run on the Linux CI job")
@@ -170,6 +168,15 @@ $settings = Get-Content -Raw $env:SAT_PARAMETERS_FILE | ConvertFrom-Json -AsHash
                 result, _ = self.run_installer("bash", platform=platform)
                 self.assert_ok(result)
                 self.assertIn(f"/sat-{VERSION}-{target}.tar.gz", self.download_log.read_text())
+
+    def test_unpublished_platform_is_rejected(self):
+        for platform in ("macos-x64", "macos-arm64", "windows-x64"):
+            with self.subTest(platform=platform):
+                result, binary = self.run_installer("bash", platform=platform)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("unsupported platform", result.stderr)
+                self.assertFalse(binary.exists())
+                self.assertFalse(self.download_log.exists())
 
     def test_unknown_tools_and_invalid_versions_fail_before_downloading(self):
         for backend in self.backends():

@@ -54,26 +54,18 @@ Currently we allow the following permissions for the sandboxes:
 
 ## Getting Started
 
-The installers download published GitHub Release assets and verify their SHA-256
-checksums. These URLs become available after the first release is published.
+The Linux x86_64 installer downloads GitHub Release assets and verifies their
+SHA-256 checksums.
 
-### Linux and macOS
-
-Install SAT and the five default tools (`python`, `jaq`, `code`, `markitdown`, `ripgrep`):
+To install SAT and all five default tools from the published prerelease:
 
 ```sh
-curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.sh | bash -s -- default-tools
+curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0-rc.1/install.sh | bash -s -- --version v0.1.0-rc.1 default-tools
 ```
 
-Or select tools and an exact release version:
-
-```sh
-curl -fsSL https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.sh | bash -s -- python,jaq --version 0.1.0
-```
-
-Omit the tool argument to install only SAT. The script detects Linux x64,
-Intel macOS, or Apple Silicon macOS. Override detection with
-`--platform linux-x64`, `macos-x64`, or `macos-arm64`.
+Replace `default-tools` with a comma-separated list such as `python,jaq`, or
+omit it to install only SAT. Use the same tag in the URL and in `--version`.
+GitHub's `latest` URL is available once a stable release is published.
 
 SAT is installed to `~/.local/bin`; change this with `--bin-dir DIRECTORY`.
 If needed, add that directory to your shell's PATH:
@@ -89,31 +81,6 @@ From a checkout of this repository, copy the skill into your harness’s skills 
 mkdir -p "$HOME/.agents/skills"
 cp -R skills/sandboxed-agent-tools "$HOME/.agents/skills/"
 ```
-
-### Windows PowerShell
-
-Install the Windows x64 host and all five tools:
-
-```powershell
-& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/latest/download/install.ps1"))) -Tools "default-tools"
-```
-
-For an exact version and selected tools:
-
-```powershell
-& ([scriptblock]::Create((Invoke-RestMethod "https://github.com/CloseChoice/sandboxed-agent-tools/releases/download/v0.1.0/install.ps1"))) -Tools "python,jaq" -Version "0.1.0"
-```
-
-Omit `-Tools` to install only SAT. The default binary directory is
-`$env:LOCALAPPDATA\SAT\bin`; override it with `-BinDir DIRECTORY`.
-The script prints the command to add this directory to the current session's
-PATH. Add it to your user PATH for future sessions.
-
-Both scripts accept versions with or without the `v` prefix, including
-prereleases such as `0.1.0-rc.1`. For a prerelease, use its explicit version
-and versioned script URL. Omitting the version selects GitHub's latest release.
-Download URLs are derived from the tag and asset name, so publishing another
-version requires no URL edits in either script.
 
 New tools start with no filesystem or HTTP permissions. Existing project and
 global permission settings are kept. After installation, `sat init` writes a
@@ -486,9 +453,8 @@ git push origin v0.1.0
 ```
 
 These commands are explicit publishing steps. See [release.md](release.md)
-for this branch's scope. Release assets include native SAT archives for the four
-supported platforms, the five tool archives, `install.sh`, `install.ps1`, and
-`SHA256SUMS`.
+for this branch's scope. Release assets include the Linux x86_64 SAT archive,
+the five tool archives, `install.sh`, and `SHA256SUMS`.
 
 Download an archive from Releases and use `sat register` with its path or URL.
 With the release archives and installer scripts downloaded, verify them using

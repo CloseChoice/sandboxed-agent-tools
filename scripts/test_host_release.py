@@ -43,11 +43,11 @@ class HostReleaseTests(unittest.TestCase):
 
     def test_missing_or_extra_host_asset_is_rejected(self):
         target = host.TARGETS[0]["target"]
-        archive, _ = self.pack(target)
+        output = self.root / "output"
+        output.mkdir()
         with self.assertRaisesRegex(ValueError, "incomplete host release"):
-            host.verify(archive.parent)
-        for entry in host.TARGETS[1:]:
-            self.pack(entry["target"])
+            host.verify(output)
+        archive, _ = self.pack(target)
         (archive.parent / "sat-unexpected.zip").write_bytes(b"unexpected")
         with self.assertRaisesRegex(ValueError, "unexpected"):
             host.verify(archive.parent)

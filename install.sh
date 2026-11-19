@@ -11,7 +11,7 @@ tools=()
 fail() { printf 'sat install: %s\n' "$*" >&2; exit 1; }
 usage() {
     echo "Usage: install.sh [default-tools|python,jaq,...] [--version VERSION] [--platform PLATFORM] [--bin-dir DIR]"
-    echo "Platforms: linux-x64, macos-x64, macos-arm64 (default: detect this machine)"
+    echo "Platform: linux-x64 (default: detect this machine)"
 }
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -40,21 +40,17 @@ done
 if [[ -z "$platform" ]]; then
     case "$(uname -s):$(uname -m)" in
         Linux:x86_64) platform=linux-x64 ;;
-        Darwin:x86_64) platform=macos-x64 ;;
-        Darwin:arm64) platform=macos-arm64 ;;
-        *) fail "unsupported machine; use install.ps1 for Windows" ;;
+        *) fail "release binaries are available for Linux x86_64" ;;
     esac
 fi
 case "$platform" in
     linux-x64) target=x86_64-unknown-linux-gnu ;;
-    macos-x64) target=x86_64-apple-darwin ;;
-    macos-arm64) target=aarch64-apple-darwin ;;
     *) fail "unsupported platform: $platform" ;;
 esac
 
 if [[ "$version" == latest ]]; then
     release_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$repo/releases/latest") ||
-        fail "no latest release found; publish a release first or specify --version"
+        fail "no latest stable release found; specify --version with the release tag (for example, v0.1.0-rc.1)"
     version="${release_url##*/}"
 fi
 version="${version#v}"
@@ -65,7 +61,8 @@ asset="sat-$version-$target.tar.gz"
 work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 
-curl -fsSL "$base/SHA256SUMS" -o "$work_dir/SHA256SUMS"
+curl -fsSL "$base/SHA256SUMS" -o "$work_dir/SHA256SUMS" ||
+    fail "could not download SHA256SUMS for v$version; check that its release assets are publicly available"
 download() {
     local name="$1" hash filename expected="" actual
     curl -fsSL "$base/$name" -o "$work_dir/$name"

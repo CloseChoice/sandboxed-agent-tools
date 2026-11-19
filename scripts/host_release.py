@@ -17,9 +17,6 @@ from release import tagged_version
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = [
     {"os": "ubuntu-24.04", "target": "x86_64-unknown-linux-gnu"},
-    {"os": "macos-15", "target": "aarch64-apple-darwin"},
-    {"os": "macos-15-intel", "target": "x86_64-apple-darwin"},
-    {"os": "windows-2025", "target": "x86_64-pc-windows-msvc"},
 ]
 
 

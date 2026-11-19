@@ -24,23 +24,13 @@ Actions artifacts only. No tag or publication is part of this preparation.
 
 ## Native SAT downloads
 
-The workflow also builds and tests native SAT executables on:
+The workflow builds and tests the Linux x86_64 SAT executable on Ubuntu 24.04.
+It packages the executable and uses the extracted archive to register and run
+the portable jaq component.
 
-- Linux x86_64 (Ubuntu 24.04 / GNU libc).
-- macOS ARM64 (Apple Silicon).
-- macOS x86_64 (Intel).
-- Windows x86_64 (MSVC).
-
-The platform matrix and packaging checks live in `scripts/host_release.py`.
-Each job runs the host tests, packages the executable, extracts that archive,
-and uses the extracted executable to register and run the same portable jaq
-component. This checks the artifact users download, including executable modes.
-
-Unix hosts use `sat-<version>-<target>.tar.gz`; Windows uses
-`sat-<version>-<target>.zip` containing `sat.exe`. Extract the matching
-archive and place the executable on PATH. The five tool archives remain portable
-across these hosts. The release checksum file covers host and tool archives.
-Publishing requires both package validation and all native host jobs to pass.
+The release includes `sat-<version>-x86_64-unknown-linux-gnu.tar.gz`, the five
+tool archives, `install.sh`, and `SHA256SUMS`. Publishing requires both the host
+job and package validation to pass.
 Branch runs assemble the same complete release bundle, verify checksums, and
 upload it as the sat-release Actions artifact. Only tag runs publish that bundle
 as a GitHub release.

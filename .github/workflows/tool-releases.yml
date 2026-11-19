@@ -8,7 +8,6 @@ on:
       - 'rust-toolchain.toml'
       - 'scripts/**'
       - 'install.sh'
-      - 'install.ps1'
       - '.github/workflows/tool-releases.yml'
   push:
     branches: ['**']
@@ -19,15 +18,11 @@ on:
       - 'rust-toolchain.toml'
       - 'scripts/**'
       - 'install.sh'
-      - 'install.ps1'
       - '.github/workflows/tool-releases.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-
-env:
-  SAT_RELEASE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
 
 concurrency:
   group: tool-releases-${{ github.ref }}
@@ -229,15 +224,16 @@ jobs:
       - name: Test native host capability boundaries
         run: cargo test --locked --release --manifest-path sat/Cargo.toml --target "$HOST_TARGET"
       - name: Package the native executable
-        run: |
-          executable="sat"
-          if [[ "$HOST_TARGET" == *windows* ]]; then executable="sat.exe"; fi
-          python3 scripts/host_release.py pack --target "$HOST_TARGET" --binary "sat/target/$HOST_TARGET/release/$executable"
+        env:
+          SAT_RELEASE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+        run: python3 scripts/host_release.py pack --target "$HOST_TARGET" --binary "sat/target/$HOST_TARGET/release/sat"
       - uses: actions/download-artifact@v8
         with:
           name: tool-jaq
           path: smoke-tools
       - name: Test the packaged host with the portable jaq component
+        env:
+          SAT_RELEASE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
         run: python3 scripts/host_release.py smoke dist/host/sat-* --target "$HOST_TARGET" --tool-archive smoke-tools/jaq.tar
       - uses: actions/upload-artifact@v7
         with:
@@ -270,15 +266,17 @@ jobs:
           path: release-assets
           merge-multiple: true
       - name: Verify every expected host and tool archive
+        env:
+          SAT_RELEASE_TAG: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
         run: |
           python3 external_tools/check_archives.py --complete release-assets/*.tar
           python3 scripts/host_release.py verify release-assets
       - name: Include installers in the release bundle
-        run: cp install.sh install.ps1 release-assets/
+        run: cp install.sh release-assets/
       - name: Generate and verify checksums
         working-directory: release-assets
         run: |
-          sha256sum *.tar *.tar.gz *.zip install.sh install.ps1 > SHA256SUMS
+          sha256sum *.tar *.tar.gz install.sh > SHA256SUMS
           sha256sum --check SHA256SUMS
       - uses: actions/upload-artifact@v7
         with:
@@ -317,7 +315,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=(release-assets/*.tar release-assets/*.tar.gz release-assets/*.zip release-assets/install.sh release-assets/install.ps1 release-assets/SHA256SUMS)
+          assets=(release-assets/*.tar release-assets/*.tar.gz release-assets/install.sh release-assets/SHA256SUMS)
           if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
             # Reruns can finish an interrupted upload without creating another release.
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
