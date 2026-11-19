@@ -80,16 +80,18 @@ pub fn extract(path: &Path, zip: bool, destination: &Path) -> Result<()> {
         let mut archive = zip::ZipArchive::new(fs::File::open(path)?)?;
         for i in 0..archive.len() {
             let entry = archive.by_index(i)?;
-            if REQUIRED_PACKAGE_FILES.contains(&entry.name())
-                || OPTIONAL_PACKAGE_FILES.contains(&entry.name())
+            let name = entry.name()?;
+            if let Some(expected) = REQUIRED_PACKAGE_FILES
+                .iter()
+                .chain(OPTIONAL_PACKAGE_FILES.iter())
+                .find(|expected| **expected == name.as_ref())
             {
                 let mode = entry.unix_mode().unwrap_or(0o100644) & 0o170000;
                 ensure!(
                     !entry.is_dir() && (mode == 0 || mode == 0o100000),
                     "required archive entries must be regular files"
                 );
-                let name = entry.name().to_owned();
-                read_archive_entry(&mut files, &name, entry)?;
+                read_archive_entry(&mut files, expected, entry)?;
             }
         }
     } else {
