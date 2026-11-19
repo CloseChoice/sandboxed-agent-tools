@@ -22,9 +22,10 @@ network permissions. The initial release includes five portable tools:
 | [markitdown](external_tools/markitdown/) | The upstream MarkItDown CLI's local PDF profile |
 | [ripgrep](external_tools/ripgrep/) | Text search using upstream ripgrep libraries |
 
-The host lives in [sat/](sat/). Other tool sources in [external_tools/](external_tools/)
-are experimental and are excluded from the initial release. The exact release
-selection lives in [release-tools.toml](external_tools/release-tools.toml).
+The host lives in [sat/](sat/). The five release tools are in
+[external_tools/](external_tools/), with the selection in
+[release-tools.toml](external_tools/release-tools.toml). Experimental tools
+are preserved on the `backup-all-tools` branch.
 
 ## Upstream credits
 

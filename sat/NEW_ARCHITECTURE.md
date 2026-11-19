@@ -8,9 +8,10 @@ Agents will then implement that.
 Sandbox your agent's tools. This enables agents to execute code that is not trusted with broad permissions.
 
 ```
-sat fuzzy-search --pattern '<somepattern>' -- --read "$PWD/file1.md" --read "$PWD/file2.md" --read "$PWD/src"
+sat ripgrep 'pattern' --path "$PWD/src" -- --read "$PWD/src"
 ```
-allows the fuzzy-search tool to only read the specified files or directories, no more. Even if the fuzzy-search would try to send the file contents via http to an attacker the web assembly system inferface's security model will catch and block that. Registration validates the binary’s actual imports and exports. The host enforces filesystem and HTTP permissions at runtime; WIT alone cannot describe allowed paths or destinations.
+
+This grants ripgrep read-only access to the selected directory for the invocation. The host validates the component's imports and exports during registration and enforces filesystem and HTTP permissions at runtime.
 
 ### Installation
 Install using the script:

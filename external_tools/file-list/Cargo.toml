@@ -1,3 +1,0 @@
-[workspace]
-members = ["component", "host"]
-resolver = "2"

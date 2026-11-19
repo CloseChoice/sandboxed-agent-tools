@@ -10,8 +10,7 @@ The development checkpoint is preserved on `new-architecture`. The
 - MarkItDown: the local PDF conversion profile, without OCR or remote backends.
 - ripgrep: text search using upstream ripgrep libraries through SAT's CLI.
 
-Other tool sources remain available for development and are excluded from
-the release build matrix, complete archive checks, and published assets.
+The `backup-all-tools` branch preserves the experimental tool sources.
 
 Validate versions with `python3 scripts/release.py`. Build the selected packages
 with each tool's `package.sh`; the release workflow derives its matrix from

@@ -1,5 +1,0 @@
-package sat:file-search@0.1.0;
-world file-search {
-    /// Paths is a newline-separated list of explicitly granted guest files.
-    export search: func(query: string, paths: string, before: option<u32>, after: option<u32>, context: u32) -> result<string, string>;
-}

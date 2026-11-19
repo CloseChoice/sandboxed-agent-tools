@@ -1,4 +1,0 @@
-package sat:uutils@0.1.0;
-world uutils {
-    export run: func(args: list<string>, input: option<string>) -> s32;
-}

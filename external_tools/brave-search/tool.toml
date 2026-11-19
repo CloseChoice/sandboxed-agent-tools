@@ -1,9 +1,0 @@
-name = "brave-search"
-version = "0.1.0"
-description = "Search the web through the Brave Search API"
-entrypoint = "search-web"
-[[arguments]]
-name = "query"
-help = "Web search query"
-[options.api-key]
-help = "Brave API key passed explicitly to the component"

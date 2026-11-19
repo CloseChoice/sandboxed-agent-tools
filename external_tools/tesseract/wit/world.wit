@@ -1,4 +1,0 @@
-package sat:tesseract@0.1.0;
-world tesseract-cli {
-    export run: func(args: list<string>) -> s32;
-}
